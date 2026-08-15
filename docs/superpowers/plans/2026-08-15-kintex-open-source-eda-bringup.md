@@ -20,6 +20,16 @@
 - Do not claim hardware qualification until the exact recorded artifact is configured and observed on the board.
 - Phase 2 accelerator and DDR3 integration are outside this plan.
 
+## Approved Execution Amendment
+
+The original `task3-main#matmul-selftest-bitstream` target was dry-run and found
+to require 34 uncached derivations, including custom LLVM and CIRCT. With user
+approval, Task 2 instead builds `fpga/rtl/kintex_selftest_top.sv` through
+`nix/kintex-selftest.nix`. That expression obtains only Yosys, nextpnr-Xilinx,
+the Kintex-7 chip database, FASM, and Project X-Ray from the exact
+`task3-main/flake.lock` graph. The revised dry run contains six derivations and
+no LLVM, MLIR, or CIRCT build.
+
 ---
 
 ## File Structure

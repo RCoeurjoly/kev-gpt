@@ -9,12 +9,13 @@ board proof to a complete Kevin accelerator port.
 
 ## Phase 1: Board and Toolchain Proof
 
-Build the existing `task3-main#matmul-selftest-bitstream` package directly
-from `/home/roland/compiler-lab-llm2fpga`. Invoke Nix with
+Build a small checked-in RTL arithmetic self-test using the exact Yosys,
+nextpnr-Xilinx, chip database, Project X-Ray FASM, and bitstream packages locked
+by `/home/roland/compiler-lab-llm2fpga/task3-main/flake.lock`. Invoke Nix with
 `--no-update-lock-file` so the checked-in lock graph remains authoritative.
-Building this narrow package exercises the pinned Yosys, nextpnr-Xilinx,
-Project X-Ray FASM, and bitstream-generation path without requesting unrelated
-CIRCT, LLVM, or full-model outputs.
+The direct RTL boundary deliberately excludes CIRCT, LLVM, and full-model
+outputs after the original generated-matmul package was found to require an
+uncached 34-derivation compiler closure.
 
 The self-test retains the existing board interface:
 
@@ -24,9 +25,9 @@ The self-test retains the existing board interface:
 - pass LED: package pin `M30`, LVCMOS18
 - failure/timeout LED: package pin `N30`, LVCMOS18
 
-After configuration, the heartbeat must toggle. The self-test initializes two
-internal vectors, runs the generated matrix-multiply core, and compares its
-result in hardware. Pass or failure is latched on its corresponding LED.
+After configuration, the heartbeat must toggle. The self-test sequentially
+sums the integers 1 through 16 and compares the result with 136 in hardware.
+Pass or failure is latched on its corresponding LED.
 
 The deliverable in this repository is a link or copy of the exact Nix-produced
 `.bit` file plus a small provenance record containing the source checkout
