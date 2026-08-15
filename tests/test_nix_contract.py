@@ -1,5 +1,7 @@
 import json
 import pathlib
+import subprocess
+import tempfile
 import unittest
 
 
@@ -29,6 +31,27 @@ class NixContractTest(unittest.TestCase):
         self.assertNotIn("led_3bits_tri_o", constraints)
         derivation = (ROOT / "nix/kintex-tinystories.nix").read_text()
         self.assertIn("--freq 50", derivation)
+
+    def test_run_logged_preserves_failure_diagnostics_and_status(self):
+        with tempfile.TemporaryDirectory() as directory:
+            log = pathlib.Path(directory) / "tool.log"
+            result = subprocess.run(
+                [
+                    "bash",
+                    str(ROOT / "scripts" / "run-logged.sh"),
+                    str(log),
+                    "bash",
+                    "-c",
+                    "printf 'route failed: bad constraint\\n' >&2; exit 23",
+                ],
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                check=False,
+            )
+            self.assertEqual(result.returncode, 23)
+            self.assertEqual(result.stdout, "route failed: bad constraint\n")
+            self.assertEqual(log.read_text(), "route failed: bad constraint\n")
 
 
 if __name__ == "__main__":

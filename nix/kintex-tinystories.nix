@@ -29,11 +29,12 @@ in pkgs.runCommand "tinystories-ypcb-${if interactive then "interactive" else "s
   ${python}/bin/python ${source}/tinystories/rtl_memories.py --output work/fixture
   cd work/fixture
   ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${source}/fpga/rtl/gptneo_sequencer.sv ${source}/fpga/rtl/gptneo_layernorm.sv ${source}/fpga/rtl/gptneo_gelu.sv ${source}/fpga/rtl/gptneo_attention.sv ${source}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
-  ${toolchain.nextpnr}/bin/nextpnr-xilinx \
+  bash ${source}/scripts/run-logged.sh "$out/nextpnr.log" \
+    ${toolchain.nextpnr}/bin/nextpnr-xilinx \
     --chipdb ${toolchain.chipdb} \
     --freq 50 \
     --xdc ${source}/fpga/constraints/kintex_selftest.xdc \
-    --json design.json --fasm design.fasm > "$out/nextpnr.log" 2>&1
+    --json design.json --fasm design.fasm
   export PYTHONPATH="${fasm}/lib/python3.12/site-packages:${python}/${pkgs.python312.sitePackages}:${prjxray}/usr/share/python3''${PYTHONPATH:+:$PYTHONPATH}"
   export PRJXRAY_DB_DIR="${familyDb}"
   export PRJXRAY_PYTHON_DIR="${prjxray}/usr/share/python3"
