@@ -12,7 +12,7 @@ import torch
 from transformers import AutoTokenizer, GPTNeoForCausalLM
 
 from .import_gptneo import import_model
-from .package_io import write_package
+from .package_io import write_package, write_receipt
 from .quantize import (
     fake_quantize_state_dict,
     measure_logits_quality,
@@ -37,6 +37,13 @@ BRAM36_BYTES = 36 * 1024 // 8
 BRAM_RESERVE_BYTES = BRAM36_COUNT * BRAM36_BYTES // 10
 KV_CACHE_BYTES = 8 * 2 * 32 * 64
 MODEL_BUDGET_BYTES = BRAM36_COUNT * BRAM36_BYTES - BRAM_RESERVE_BYTES
+REGRESSION_PROMPTS = [
+    ("Lily had a little", [7454, 2402, 257, 640], 8),
+    ("The little princess wanted to go outside and find a",
+     [464, 1310, 2576, 1816, 284, 262, 11376, 290, 2497, 257, 1402], 12),
+    ("Unexpected symbols near the garden gate:",
+     [21321, 986, 644, 12248, 383, 4171, 21831, 531, 25], 6),
+]
 
 
 def _fixture_ids(tokenizer) -> np.ndarray:
@@ -242,6 +249,24 @@ def build_qualified_package(source_dir: pathlib.Path, out_dir: pathlib.Path) -> 
         },
     }
     (out_dir / "quality.json").write_text(json.dumps(quality, indent=2, sort_keys=True) + "\n")
+    from .int_reference import IntegerGPTNeo, trace_sha256
+
+    reference = IntegerGPTNeo(out_dir)
+    regressions = []
+    for prompt_text, prompt_ids, requested_tokens in REGRESSION_PROMPTS:
+        output_ids = reference.generate(prompt_ids, requested_tokens)
+        regressions.append({
+            "prompt_text": prompt_text,
+            "prompt_ids": prompt_ids,
+            "requested_tokens": requested_tokens,
+            "output_ids": output_ids,
+            "decoded_output": tokenizer.decode(output_ids),
+            "trace_sha256": trace_sha256(reference.trace(prompt_ids, requested_tokens)),
+        })
+    (out_dir / "regressions.json").write_text(json.dumps(
+        {"schema_version": 1, "regressions": regressions}, indent=2, sort_keys=True
+    ) + "\n")
+    write_receipt(out_dir)
     return manifest
 
 

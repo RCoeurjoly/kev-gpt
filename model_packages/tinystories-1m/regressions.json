@@ -1,0 +1,85 @@
+{
+  "regressions": [
+    {
+      "decoded_output": ", there was a little girl named Lily",
+      "output_ids": [
+        11,
+        612,
+        373,
+        257,
+        1310,
+        2576,
+        3706,
+        20037
+      ],
+      "prompt_ids": [
+        7454,
+        2402,
+        257,
+        640
+      ],
+      "prompt_text": "Lily had a little",
+      "requested_tokens": 8,
+      "trace_sha256": "f356b5be169c9121311411c5a5aa417e38725996fd6c65a90b173de57e404140"
+    },
+    {
+      "decoded_output": ", a big, red ball. She wanted to pick it",
+      "output_ids": [
+        11,
+        257,
+        1263,
+        11,
+        2266,
+        2613,
+        13,
+        1375,
+        2227,
+        284,
+        2298,
+        340
+      ],
+      "prompt_ids": [
+        464,
+        1310,
+        2576,
+        1816,
+        284,
+        262,
+        11376,
+        290,
+        2497,
+        257,
+        1402
+      ],
+      "prompt_text": "The little princess wanted to go outside and find a",
+      "requested_tokens": 12,
+      "trace_sha256": "3b012058a2a5fd603c1e7f90f1f18ff52b8b21af53e12096b16715ed966a4059"
+    },
+    {
+      "decoded_output": " \"Oh don't it was",
+      "output_ids": [
+        366,
+        5812,
+        836,
+        470,
+        340,
+        373
+      ],
+      "prompt_ids": [
+        21321,
+        986,
+        644,
+        12248,
+        383,
+        4171,
+        21831,
+        531,
+        25
+      ],
+      "prompt_text": "Unexpected symbols near the garden gate:",
+      "requested_tokens": 6,
+      "trace_sha256": "4addbc8d1c2f5bed3bc12609cf4e5c4001f79d6c2d16f88acaecf7c1a6cd92fc"
+    }
+  ],
+  "schema_version": 1
+}

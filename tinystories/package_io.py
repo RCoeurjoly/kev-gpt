@@ -17,6 +17,26 @@ def _json_bytes(value: object) -> bytes:
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def write_receipt(out_dir: pathlib.Path) -> dict[str, object]:
+    """Hash every completed package file except the receipt itself."""
+
+    out_dir = pathlib.Path(out_dir)
+    files = {}
+    for path in sorted(out_dir.iterdir(), key=lambda item: item.name):
+        if not path.is_file() or path.name == "receipt.json":
+            continue
+        data = path.read_bytes()
+        files[path.name] = {"size": len(data), "sha256": _digest(data)}
+    manifest_sha256 = files["manifest.json"]["sha256"]
+    receipt = {
+        "schema_version": 1,
+        "manifest_sha256": manifest_sha256,
+        "files": files,
+    }
+    (out_dir / "receipt.json").write_bytes(_json_bytes(receipt))
+    return receipt
+
+
 def write_package(pkg: QuantizedPackage, out_dir: pathlib.Path) -> dict[str, object]:
     """Write stable binary images, offsets, hashes, manifest, and receipt."""
 
@@ -60,15 +80,5 @@ def write_package(pkg: QuantizedPackage, out_dir: pathlib.Path) -> dict[str, obj
         (out_dir / name).write_bytes(data)
     manifest_data = _json_bytes(manifest)
     (out_dir / "manifest.json").write_bytes(manifest_data)
-    receipt_files = dict(files)
-    receipt_files["manifest.json"] = {
-        "size": len(manifest_data),
-        "sha256": _digest(manifest_data),
-    }
-    receipt = {
-        "schema_version": 1,
-        "manifest_sha256": _digest(manifest_data),
-        "files": dict(sorted(receipt_files.items())),
-    }
-    (out_dir / "receipt.json").write_bytes(_json_bytes(receipt))
+    write_receipt(out_dir)
     return manifest

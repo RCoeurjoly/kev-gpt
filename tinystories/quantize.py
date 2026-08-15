@@ -229,15 +229,15 @@ def quantize_model(
                 format=f"symmetric_int{bits}_per_output",
             )
         else:
-            half = np.asarray(value, dtype="<f2")
+            full = np.asarray(value, dtype="<f4")
             tensor = QuantizedTensor(
-                data=half.tobytes(),
+                data=full.tobytes(),
                 scales=b"",
                 logical_shape=tuple(value.shape),
-                packed_shape=tuple(half.shape),
-                bits=16,
+                packed_shape=tuple(full.shape),
+                bits=32,
                 signed=True,
-                format="float16",
+                format="float32",
             )
         tensors[name] = tensor
         roles[name] = {"storage": name}

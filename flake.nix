@@ -61,7 +61,8 @@
           cd ${self}
           python -m unittest -v \
             tests/test_gptneo_import.py \
-            tests/test_tinystories_quantize.py
+            tests/test_tinystories_quantize.py \
+            tests/test_tinystories_int_reference.py
           touch $out
         '';
 

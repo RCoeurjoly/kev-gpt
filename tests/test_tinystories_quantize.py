@@ -65,6 +65,13 @@ class TinyStoriesQuantizeTest(unittest.TestCase):
         self.assertEqual(role["alias_of"], "token_embedding.weight")
         self.assertNotIn("lm_head.weight", package.tensors)
 
+    def test_layernorm_and_bias_tensors_retain_fp32_precision(self):
+        package = quantize_model(self.synthetic_model(), np.array([1, 2, 3]), max_context=4)
+        bias = package.tensors["blocks.0.ln1.bias"]
+        self.assertEqual(bias.bits, 32)
+        self.assertEqual(bias.format, "float32")
+        self.assertEqual(len(bias.data), 4 * 4)
+
     def test_mixed_precision_override_changes_emitted_storage(self):
         model = self.synthetic_model()
         default = quantize_model(model, np.array([1, 2, 3]), max_context=4)
