@@ -14,6 +14,7 @@
         ps.transformers
         ps.tokenizers
       ]);
+      modelSource = import ./nix/model-source.nix { inherit pkgs; };
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -27,15 +28,30 @@
         ];
       };
 
-      checks.${system}.nix-contract = pkgs.runCommand "nix-contract" {
-        nativeBuildInputs = [ python ];
-      } ''
-        cd ${self}
-        python -m unittest -v tests/test_nix_contract.py
-        touch $out
-      '';
+      checks.${system} = {
+        nix-contract = pkgs.runCommand "nix-contract" {
+          nativeBuildInputs = [ python ];
+        } ''
+          cd ${self}
+          python -m unittest -v tests/test_nix_contract.py
+          touch $out
+        '';
+
+        gptneo-schema = pkgs.runCommand "gptneo-schema" {
+          nativeBuildInputs = [ python ];
+        } ''
+          cd ${self}
+          python -m unittest -v tests/test_gptneo_schema.py
+          touch $out
+        '';
+      };
 
       lib.edaToolchain = compilerLab:
         import ./nix/eda-toolchain.nix { inherit compilerLab; };
+
+      packages.${system} = {
+        tinystories-1m-source = modelSource;
+        default = modelSource;
+      };
     };
 }
