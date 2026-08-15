@@ -15,6 +15,16 @@
         ps.tokenizers
       ]);
       modelSource = import ./nix/model-source.nix { inherit pkgs; };
+      regeneratedModelPackage = pkgs.runCommand "tinystories-1m-package-regenerated" {
+        nativeBuildInputs = [ python ];
+      } ''
+        export HF_HUB_OFFLINE=1
+        export TRANSFORMERS_OFFLINE=1
+        cd ${self}
+        python -m tinystories.build_package \
+          --source ${modelSource} \
+          --output "$out"
+      '';
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -44,6 +54,25 @@
           python -m unittest -v tests/test_gptneo_schema.py
           touch $out
         '';
+
+        model-package-unit = pkgs.runCommand "model-package-unit" {
+          nativeBuildInputs = [ python ];
+        } ''
+          cd ${self}
+          python -m unittest -v \
+            tests/test_gptneo_import.py \
+            tests/test_tinystories_quantize.py
+          touch $out
+        '';
+
+        model-package-reproducible = pkgs.runCommand "model-package-reproducible" {
+          nativeBuildInputs = [ pkgs.diffutils ];
+        } ''
+          diff -r \
+            ${self}/model_packages/tinystories-1m \
+            ${regeneratedModelPackage}
+          touch $out
+        '';
       };
 
       lib.edaToolchain = compilerLab:
@@ -51,6 +80,7 @@
 
       packages.${system} = {
         tinystories-1m-source = modelSource;
+        tinystories-1m-package-regenerated = regeneratedModelPackage;
         default = modelSource;
       };
     };
