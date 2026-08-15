@@ -181,7 +181,7 @@
           mkdir -p "$out"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_gelu.sv; synth_xilinx -family xc7 -top gptneo_gelu; stat' > "$out/gelu.log"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_layernorm.sv; synth_xilinx -family xc7 -top gptneo_layernorm; stat' > "$out/layernorm.log"
-          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_attention.sv; synth_xilinx -family xc7 -top gptneo_attention; stat' > "$out/attention.log"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv; synth_xilinx -family xc7 -top gptneo_attention; stat' > "$out/attention.log"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_resident_gemv; stat' > "$out/gemv.log"
         '';
         gptneo-sequencer-yosys-report = pkgs.runCommand "gptneo-sequencer-yosys-report" {
@@ -192,7 +192,7 @@
           python ${self}/tinystories/rtl_memories.py --output work
           cd work
           mkdir -p "$out"
-          yosys -p 'read_verilog -sv -I. ${self}/fpga/rtl/gptneo_sequencer.sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_gelu.sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_sequencer; stat' > "$out/sequencer.log"
+          yosys -p 'read_verilog -sv -I. ${self}/fpga/rtl/gptneo_sequencer.sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_gelu.sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_sequencer; stat' > "$out/sequencer.log"
         '';
         default = modelSource;
       };

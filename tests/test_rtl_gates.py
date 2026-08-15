@@ -13,6 +13,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 class RTLPrimitiveGateTest(unittest.TestCase):
     CASES = {
+        "iterative_divider": "GPTNEO_DIVIDER_PASS",
         "layernorm": "GPTNEO_LAYERNORM_PASS",
         "gelu": "GPTNEO_GELU_PASS",
         "attention": "GPTNEO_ATTN_PASS",
@@ -30,8 +31,11 @@ class RTLPrimitiveGateTest(unittest.TestCase):
                 if name == "attention":
                     write_exp_lut(pathlib.Path(temporary))
                 executable = pathlib.Path(temporary) / name
+                sources = [rtl]
+                if name == "attention":
+                    sources.append(ROOT / "fpga/rtl/gptneo_iterative_divider.sv")
                 compile_result = subprocess.run(
-                    ["iverilog", "-g2012", "-s", f"tb_gptneo_{name}", "-o", executable, rtl, testbench],
+                    ["iverilog", "-g2012", "-s", f"tb_gptneo_{name}", "-o", executable, *sources, testbench],
                     text=True,
                     capture_output=True,
                 )
@@ -59,6 +63,7 @@ class RTLSequencerGateTest(unittest.TestCase):
                 ROOT / "fpga/rtl/gptneo_layernorm.sv",
                 ROOT / "fpga/rtl/gptneo_gelu.sv",
                 ROOT / "fpga/rtl/gptneo_attention.sv",
+                ROOT / "fpga/rtl/gptneo_iterative_divider.sv",
                 ROOT / "fpga/rtl/gptneo_resident_gemv.sv",
                 ROOT / "fpga/tb/tb_gptneo_sequencer.sv",
             ]

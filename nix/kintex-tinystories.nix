@@ -28,7 +28,7 @@ in pkgs.runCommand "tinystories-ypcb-${if interactive then "interactive" else "s
   ${python}/bin/python -m tinystories.write_rtl_fixture --package ${modelPackage} --output work/fixture
   ${python}/bin/python ${source}/tinystories/rtl_memories.py --output work/fixture
   cd work/fixture
-  ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${source}/fpga/rtl/gptneo_sequencer.sv ${source}/fpga/rtl/gptneo_layernorm.sv ${source}/fpga/rtl/gptneo_gelu.sv ${source}/fpga/rtl/gptneo_attention.sv ${source}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
+  ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${source}/fpga/rtl/gptneo_sequencer.sv ${source}/fpga/rtl/gptneo_layernorm.sv ${source}/fpga/rtl/gptneo_gelu.sv ${source}/fpga/rtl/gptneo_attention.sv ${source}/fpga/rtl/gptneo_iterative_divider.sv ${source}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
   bash ${source}/scripts/run-logged.sh "$out/nextpnr.log" \
     ${toolchain.nextpnr}/bin/nextpnr-xilinx \
     --chipdb ${toolchain.chipdb} \
