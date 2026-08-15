@@ -32,7 +32,7 @@ class RTLPrimitiveGateTest(unittest.TestCase):
                     write_exp_lut(pathlib.Path(temporary))
                 executable = pathlib.Path(temporary) / name
                 sources = [rtl]
-                if name == "attention":
+                if name in {"attention", "gemv"}:
                     sources.append(ROOT / "fpga/rtl/gptneo_iterative_divider.sv")
                 compile_result = subprocess.run(
                     ["iverilog", "-g2012", "-s", f"tb_gptneo_{name}", "-o", executable, *sources, testbench],

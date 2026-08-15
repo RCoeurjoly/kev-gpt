@@ -33,7 +33,8 @@ module gptneo_resident_gemv #(
       B_ADDR=6'd14,B_READ=6'd15,B_CAPTURE=6'd16,
       OS_ADDR=6'd17,OS_READ0=6'd18,OS_READ1=6'd19,OS_READ2=6'd20,
       OS_CAPTURE=6'd21,SCALE=6'd22,EMIT=6'd23,RAW_READ0=6'd24,
-      RAW_READ1=6'd25,RAW_READ2=6'd26,RAW_RESP=6'd27;
+      RAW_READ1=6'd25,RAW_READ2=6'd26,RAW_RESP=6'd27,
+      Q_DIV_START=6'd28,Q_DIV_WAIT=6'd29,SCALE_DIV_START=6'd30,SCALE_DIV_WAIT=6'd31;
     reg [5:0] state;reg [$clog2(KMAX)-1:0] activation_ptr,column;
     reg [$clog2(MMAX)-1:0] row;reg signed [63:0] accumulator;
     reg signed [7:0] weight_q;
@@ -43,7 +44,13 @@ module gptneo_resident_gemv #(
     reg [31:0] read_word,scale_low_word;reg [63:0] scale_window;
     reg signed [127:0] scale_product;reg signed [63:0] real_q16,numerator,qcode_wide;
     reg signed [63:0] magnitude,dequant_product,clipped_code;
+    reg [23:0] input_quant_scale_q24;
+    reg div_start;reg signed [95:0] div_numerator;reg [63:0] div_denominator;
+    wire div_busy,div_done;wire signed [31:0] div_quotient;
     assign activation_ready=(state==IDLE)&&(activation_ptr<k_count);assign busy=(state!=IDLE);
+    gptneo_iterative_divider quant_divider(
+        .clk(clk),.rst(rst),.start(div_start),.numerator(div_numerator),
+        .denominator(div_denominator),.busy(div_busy),.done(div_done),.quotient(div_quotient));
     function automatic signed [63:0] rounded_shift32;
         input signed [127:0] value;reg signed [127:0] mag;begin
             mag=value<0?-value:value;mag=(mag+(128'sd1<<<31))>>>32;
@@ -51,9 +58,10 @@ module gptneo_resident_gemv #(
     endfunction
     always @(posedge clk) begin
         if(weight_we)image[weight_addr]<=weight_data;
-        if(rst)begin state<=IDLE;activation_ptr<=0;out_valid<=0;raw_valid<=0;
+        if(rst)begin state<=IDLE;activation_ptr<=0;out_valid<=0;raw_valid<=0;div_start<=0;
             row<=0;column<=0;accumulator<=0;end
         else begin
+            div_start<=0;
             if(activation_valid&&activation_ready)begin activation_values[activation_ptr]<=activation_data_q16;
                 activation_ptr<=activation_ptr+1'b1;end
             case(state)
@@ -68,11 +76,19 @@ module gptneo_resident_gemv #(
                     scale_window={read_word,scale_low_word}>>(scale_lane*8);
                     numerator=$signed(activation_values[column])<<<8;
                     magnitude=numerator<0?-numerator:numerator;
-                    qcode_wide=(magnitude+(scale_window[23:0]>>1))/$signed({1'b0,scale_window[23:0]});
-                    if(numerator<0)qcode_wide=-qcode_wide;
+                    input_quant_scale_q24<=scale_window[23:0];
+                    div_numerator<=numerator<0
+                        ? -$signed(magnitude+(scale_window[23:0]>>1))
+                        :  $signed(magnitude+(scale_window[23:0]>>1));
+                    div_denominator<={40'd0,scale_window[23:0]};
+                    state<=Q_DIV_START;
+                end
+                Q_DIV_START:begin div_start<=1;state<=Q_DIV_WAIT;end
+                Q_DIV_WAIT:if(div_done)begin
+                    qcode_wide=$signed(div_quotient);
                     if(qcode_wide>127)clipped_code=127;else if(qcode_wide< -128)clipped_code=-128;
                     else clipped_code=qcode_wide;
-                    scaled_activations[column]<=clipped_code*$signed({1'b0,scale_window[23:0]});
+                    scaled_activations[column]<=clipped_code*$signed({1'b0,input_quant_scale_q24});
                     if(column==k_count-1)begin column<=0;state<=W_ADDR;end
                     else begin column<=column+1'b1;state<=Q_ADDR;end
                 end
@@ -108,14 +124,21 @@ module gptneo_resident_gemv #(
                     real_q16=rounded_shift32(scale_product)+$signed(bias_q16);out_accumulator<=accumulator;
                     if(has_output_scale)begin
                         numerator=real_q16<<<8;magnitude=numerator<0?-numerator:numerator;
-                        qcode_wide=(magnitude+(output_scale_q24>>1))/$signed({1'b0,output_scale_q24});
-                        if(numerator<0)qcode_wide=-qcode_wide;
-                        if(qcode_wide>127)clipped_code=127;else if(qcode_wide< -128)clipped_code=-128;else clipped_code=qcode_wide;
-                        out_code<=clipped_code[7:0];dequant_product=clipped_code*$signed({1'b0,output_scale_q24});
-                        magnitude=dequant_product<0?-dequant_product:dequant_product;
-                        magnitude=(magnitude+128)>>>8;
-                        out_value_q16<=dequant_product<0?-magnitude:magnitude;
-                    end else begin out_code<=0;out_value_q16<=real_q16;end
+                        div_numerator<=numerator<0
+                            ? -$signed(magnitude+(output_scale_q24>>1))
+                            :  $signed(magnitude+(output_scale_q24>>1));
+                        div_denominator<={40'd0,output_scale_q24};state<=SCALE_DIV_START;
+                    end else begin out_code<=0;out_value_q16<=real_q16;
+                        out_index<=row;out_valid<=1;state<=EMIT;end
+                end
+                SCALE_DIV_START:begin div_start<=1;state<=SCALE_DIV_WAIT;end
+                SCALE_DIV_WAIT:if(div_done)begin
+                    qcode_wide=$signed(div_quotient);
+                    if(qcode_wide>127)clipped_code=127;else if(qcode_wide< -128)clipped_code=-128;else clipped_code=qcode_wide;
+                    out_code<=clipped_code[7:0];dequant_product=clipped_code*$signed({1'b0,output_scale_q24});
+                    magnitude=dequant_product<0?-dequant_product:dequant_product;
+                    magnitude=(magnitude+128)>>>8;
+                    out_value_q16<=dequant_product<0?-magnitude:magnitude;
                     out_index<=row;out_valid<=1;state<=EMIT;
                 end
                 EMIT:if(out_ready)begin out_valid<=0;if(row==m_count-1)begin activation_ptr<=0;state<=IDLE;end
