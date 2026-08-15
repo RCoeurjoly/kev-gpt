@@ -33,6 +33,7 @@ class RTLFixtureTest(unittest.TestCase):
             self.assertEqual(first_document["numeric_formats"]["scale_storage_bits"], 24)
             self.assertEqual(len(first_document["regressions"]), 3)
             header = (first_path / "gptneo_package.svh").read_text()
+            self.assertIn("GPTNEO_PACKAGE_TAG", header)
             self.assertIn("GPTNEO_TENSOR_TOKEN_EMBEDDING_WEIGHT_OFFSET", header)
             self.assertIn("GPTNEO_ACT_LM_HEAD_INPUT_OFFSET", header)
 

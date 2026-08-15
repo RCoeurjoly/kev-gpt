@@ -30,6 +30,8 @@ module gptneo_layernorm #(
     reg signed [63:0] mean;
     reg [79:0] square_sum;
     reg signed [63:0] delta;
+    reg [63:0] delta_magnitude;
+    reg [127:0] delta_square;
     reg [63:0] variance;
     reg [63:0] deviation;
     reg signed [95:0] normalized;
@@ -61,15 +63,17 @@ module gptneo_layernorm #(
                 end
                 VAR: begin
                     delta = $signed(xmem[index]) - mean;
+                    delta_magnitude = delta < 0 ? -delta : delta;
+                    delta_square = delta_magnitude * delta_magnitude;
                     if (index == D-1) begin
-                        variance = (square_sum + delta*delta) / D + EPSILON_Q32;
+                        variance = (square_sum + delta_square) / D + EPSILON_Q32;
                         sqrt_operand <= variance;
                         sqrt_result <= 0;
                         sqrt_bit <= 64'h4000000000000000;
                         index <= 0;
                         state <= SQRT_ALIGN;
                     end else begin
-                        square_sum <= square_sum + delta*delta;
+                        square_sum <= square_sum + delta_square;
                         index <= index + 1'b1;
                     end
                 end

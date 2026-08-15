@@ -44,6 +44,32 @@
           --source ${modelSource} \
           --output "$out"
       '';
+      jtagTransport = pkgs.stdenv.mkDerivation {
+        pname = "kevin-jtag-transport";
+        version = "1";
+        src = self;
+        buildInputs = [ pkgs.libftdi1 ];
+        dontConfigure = true;
+        buildPhase = ''
+          cc -O2 -Wall -Wextra -Werror -fPIC -shared \
+            host/jtag_transport.c -o libkevin_jtag.so -lftdi1
+        '';
+        installPhase = ''
+          mkdir -p "$out/lib" "$out/include"
+          cp libkevin_jtag.so "$out/lib/"
+          cp host/jtag_transport.h "$out/include/"
+        '';
+      };
+      kevinJtag = pkgs.writeShellApplication {
+        name = "kevin-jtag";
+        runtimeInputs = [ python pkgs.openfpgaloader ];
+        text = ''
+          export PYTHONPATH=${self}
+          export KEVIN_JTAG_LIBRARY=${jtagTransport}/lib/libkevin_jtag.so
+          export KEVIN_MODEL_PACKAGE=${self}/model_packages/tinystories-1m
+          exec python -m host.kevin_jtag_cli "$@"
+        '';
+      };
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -95,7 +121,7 @@
         '';
 
         rtl-primitives = pkgs.runCommand "rtl-primitives" {
-          nativeBuildInputs = [ python pkgs.iverilog ];
+          nativeBuildInputs = [ python pkgs.iverilog pkgs.verilator ];
         } ''
           cd ${self}
           python -m unittest -v tests/test_rtl_gates.py
@@ -117,6 +143,23 @@
           grep -q '"passed": true' ${hardwareQuality}
           touch $out
         '';
+
+        jtag-transport = pkgs.runCommand "jtag-transport-check" {
+          nativeBuildInputs = [ python pkgs.iverilog pkgs.stdenv.cc pkgs.libftdi1 ];
+        } ''
+          cd ${self}
+          python -m unittest -v \
+            tests/test_jtag_packet.py \
+            tests/test_host_cli.py \
+            tests/test_jtag_rtl.py
+          ${kevinJtag}/bin/kevin-jtag packet-selftest
+          touch $out
+        '';
+      };
+
+      apps.${system}.kevin-jtag = {
+        type = "app";
+        program = "${kevinJtag}/bin/kevin-jtag";
       };
 
       lib.edaToolchain = compilerLab:
@@ -127,6 +170,8 @@
         tinystories-1m-package-regenerated = regeneratedModelPackage;
         tinystories-rtl-fixture = rtlFixture;
         tinystories-hardware-quality = hardwareQuality;
+        kevin-jtag-transport = jtagTransport;
+        kevin-jtag = kevinJtag;
         gptneo-rtl-primitives-yosys-report = pkgs.runCommand "gptneo-rtl-primitives-yosys-report" {
           nativeBuildInputs = [ python pkgs.yosys ];
         } ''
@@ -138,6 +183,16 @@
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_layernorm.sv; synth_xilinx -family xc7 -top gptneo_layernorm; stat' > "$out/layernorm.log"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_attention.sv; synth_xilinx -family xc7 -top gptneo_attention; stat' > "$out/attention.log"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_resident_gemv; stat' > "$out/gemv.log"
+        '';
+        gptneo-sequencer-yosys-report = pkgs.runCommand "gptneo-sequencer-yosys-report" {
+          nativeBuildInputs = [ python pkgs.yosys ];
+        } ''
+          mkdir work
+          cp ${rtlFixture}/model_image.mem ${rtlFixture}/gptneo_package.svh work/
+          python ${self}/tinystories/rtl_memories.py --output work
+          cd work
+          mkdir -p "$out"
+          yosys -p 'read_verilog -sv -I. ${self}/fpga/rtl/gptneo_sequencer.sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_gelu.sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_sequencer; stat' > "$out/sequencer.log"
         '';
         default = modelSource;
       };

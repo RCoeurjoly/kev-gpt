@@ -1,9 +1,11 @@
 import pathlib
+import json
 import subprocess
 import tempfile
 import unittest
 
 from tinystories.rtl_memories import write_exp_lut, write_gelu_lut
+from tinystories.write_rtl_fixture import write_rtl_fixture
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -41,6 +43,47 @@ class RTLPrimitiveGateTest(unittest.TestCase):
                     simulation.returncode, 0, simulation.stdout + simulation.stderr
                 )
                 self.assertIn(verdict, simulation.stdout)
+
+
+class RTLSequencerGateTest(unittest.TestCase):
+    def test_three_streams_and_corrupt_package_verdict(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            fixture = directory / "fixture"
+            write_rtl_fixture(ROOT / "model_packages" / "tinystories-1m", fixture)
+            write_gelu_lut(fixture)
+            write_exp_lut(fixture)
+            object_directory = directory / "obj"
+            sources = [
+                ROOT / "fpga/rtl/gptneo_sequencer.sv",
+                ROOT / "fpga/rtl/gptneo_layernorm.sv",
+                ROOT / "fpga/rtl/gptneo_gelu.sv",
+                ROOT / "fpga/rtl/gptneo_attention.sv",
+                ROOT / "fpga/rtl/gptneo_resident_gemv.sv",
+                ROOT / "fpga/tb/tb_gptneo_sequencer.sv",
+            ]
+            compilation = subprocess.run([
+                "verilator", "--binary", "--timing", "-Wno-fatal",
+                f"-I{fixture}", "--top-module", "tb_gptneo_sequencer",
+                "--Mdir", object_directory, "-o", "sequencer_sim", *sources,
+            ], text=True, capture_output=True)
+            self.assertEqual(compilation.returncode, 0, compilation.stderr)
+            simulation = subprocess.run(
+                [object_directory / "sequencer_sim"], cwd=fixture,
+                text=True, capture_output=True
+            )
+            self.assertEqual(
+                simulation.returncode, 0, simulation.stdout + simulation.stderr
+            )
+            regressions = json.loads((fixture / "fixture.json").read_text())["regressions"]
+            for index, case in enumerate(regressions):
+                self.assertIn(
+                    f"GPTNEO_SEQ_PASS case={index} tokens={len(case['output_ids'])}/{len(case['output_ids'])}",
+                    simulation.stdout,
+                )
+            self.assertIn(
+                "GPTNEO_SEQ_NEGATIVE_PASS error=PACKAGE_HASH", simulation.stdout
+            )
 
 
 if __name__ == "__main__":

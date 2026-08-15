@@ -123,7 +123,7 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
     )
 
     header = [
-        "`ifndef GPTNEO_PACKAGE_SVH", "`define GPTNEO_PACKAGE_SVH",
+        f"localparam [31:0] GPTNEO_PACKAGE_TAG = 32'h{receipt['manifest_sha256'][:8]};",
         f"localparam integer GPTNEO_MODEL_IMAGE_BYTES = {len(resident_image)};",
         f"localparam integer GPTNEO_MODEL_IMAGE_WORDS = {(len(resident_image)+3)//4};",
         f"localparam integer GPTNEO_SCALE_BASE = {scale_base};",
@@ -150,7 +150,7 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
             f"localparam integer GPTNEO_CASE_{index}_EXPECTED_OFFSET = {case['expected_offset']};",
             f"localparam integer GPTNEO_CASE_{index}_EXPECTED_LENGTH = {len(case['output_ids'])};",
         ])
-    header.extend(["`endif", ""])
+    header.append("")
     (output / "gptneo_package.svh").write_text("\n".join(header))
 
     inputs = {name: dict(value) for name, value in sorted(receipt["files"].items())}

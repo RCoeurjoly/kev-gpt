@@ -3,8 +3,10 @@ module tb_gptneo_gemv;
     localparam MMAX=4,KMAX=4,WDEPTH_BYTES=64;
     reg clk=0;always #5 clk=~clk;
     reg rst=1,weight_we=0,activation_valid=0,start=0,out_ready=0;
+    reg raw_read=0,raw_ready=0;wire raw_valid;reg [$clog2(WDEPTH_BYTES)-1:0] raw_addr=0;
+    wire [31:0] raw_data;
     reg [$clog2((WDEPTH_BYTES+3)/4)-1:0] weight_addr=0;reg [31:0] weight_data=0;
-    reg signed [7:0] activation_data=0;wire activation_ready,out_valid,busy;
+    reg signed [31:0] activation_data_q16=0;wire activation_ready,out_valid,busy;
     reg [7:0] matrix_id=0;reg [$clog2(WDEPTH_BYTES)-1:0] matrix_base=0;
     reg [$clog2(WDEPTH_BYTES)-1:0] input_scale_base=20,weight_scale_base=32;
     reg [$clog2(WDEPTH_BYTES)-1:0] output_scale_base=40,bias_base=48;
@@ -17,7 +19,7 @@ module tb_gptneo_gemv;
     task putw;input integer address;input [31:0] value;begin
         weight_addr<=address;weight_data<=value;weight_we<=1;@(posedge clk);weight_we<=0;end endtask
     task putx;input integer value;begin while(!activation_ready)@(posedge clk);
-        activation_data<=value;activation_valid<=1;@(posedge clk);activation_valid<=0;end endtask
+        activation_data_q16<=value*32768;activation_valid<=1;@(posedge clk);activation_valid<=0;end endtask
     task launch;input integer id;input integer base;input integer rows;begin
         matrix_id<=id;matrix_base<=base;m_count<=rows;k_count<=3;start<=1;@(posedge clk);start<=0;end endtask
     task check_output;input integer index;input integer value;integer held;begin
@@ -34,6 +36,9 @@ module tb_gptneo_gemv;
         putw(5,32'h00800000);putw(6,32'h00008000);putw(7,32'h00000080);
         putw(8,32'h00800000);putw(9,32'h00008000);
         putw(10,32'h00400000);putw(11,32'h00004000);
+        raw_addr<=4;raw_read<=1;@(posedge clk);raw_read<=0;
+        while(!raw_valid)@(negedge clk);if(raw_data!=={8'd0,-8'sd6,8'd5,-8'sd4})
+            $fatal(1,"GEMV raw read mismatch");raw_ready<=1;@(posedge clk);raw_ready<=0;
         k_count<=3;putx(2);putx(-1);putx(3);launch(0,0,2);check_output(0,13);check_output(1,-31);
         putx(2);putx(-1);putx(3);launch(1,0,1);check_output(0,13);
         putx(2);putx(-1);putx(3);launch(2,16,1);check_output(0,33);

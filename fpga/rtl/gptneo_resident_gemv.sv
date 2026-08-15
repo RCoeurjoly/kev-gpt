@@ -7,7 +7,9 @@ module gptneo_resident_gemv #(
 ) (
     input wire clk,input wire rst,input wire weight_we,
     input wire [$clog2((WDEPTH_BYTES+3)/4)-1:0] weight_addr,input wire [31:0] weight_data,
-    input wire activation_valid,output wire activation_ready,input wire signed [7:0] activation_data,
+    input wire raw_read,input wire [$clog2(WDEPTH_BYTES)-1:0] raw_addr,
+    output reg raw_valid,input wire raw_ready,output reg [31:0] raw_data,
+    input wire activation_valid,output wire activation_ready,input wire signed [31:0] activation_data_q16,
     input wire start,input wire [7:0] matrix_id,
     input wire [$clog2(WDEPTH_BYTES)-1:0] matrix_base,input wire [$clog2(KMAX+1)-1:0] row_stride,
     input wire [$clog2(WDEPTH_BYTES)-1:0] input_scale_base,
@@ -22,17 +24,19 @@ module gptneo_resident_gemv #(
 );
     localparam integer WWORDS=(WDEPTH_BYTES+3)/4;
     (* ram_style="block" *) reg [31:0] image[0:WWORDS-1];
-    (* ram_style="distributed" *) reg signed [7:0] activations[0:KMAX-1];
+    (* ram_style="distributed" *) reg signed [31:0] activation_values[0:KMAX-1];
+    (* ram_style="distributed" *) reg signed [31:0] scaled_activations[0:KMAX-1];
     initial if(WEIGHT_FILE!="") $readmemh(WEIGHT_FILE,image);
-    localparam IDLE=6'd0,W_ADDR=6'd1,W_READ=6'd2,AS_ADDR=6'd3,
-      AS_READ0=6'd4,AS_READ1=6'd5,AS_READ2=6'd6,AS_CAPTURE=6'd7,MAC=6'd8,
+    localparam IDLE=6'd0,W_ADDR=6'd1,W_READ=6'd2,MAC=6'd3,
+      Q_ADDR=6'd4,Q_READ0=6'd5,Q_READ1=6'd6,Q_READ2=6'd7,Q_CAPTURE=6'd8,
       WS_ADDR=6'd9,WS_READ0=6'd10,WS_READ1=6'd11,WS_READ2=6'd12,WS_CAPTURE=6'd13,
       B_ADDR=6'd14,B_READ=6'd15,B_CAPTURE=6'd16,
       OS_ADDR=6'd17,OS_READ0=6'd18,OS_READ1=6'd19,OS_READ2=6'd20,
-      OS_CAPTURE=6'd21,SCALE=6'd22,EMIT=6'd23;
+      OS_CAPTURE=6'd21,SCALE=6'd22,EMIT=6'd23,RAW_READ0=6'd24,
+      RAW_READ1=6'd25,RAW_READ2=6'd26,RAW_RESP=6'd27;
     reg [5:0] state;reg [$clog2(KMAX)-1:0] activation_ptr,column;
     reg [$clog2(MMAX)-1:0] row;reg signed [63:0] accumulator;
-    reg signed [7:0] activation_q,weight_q;reg [23:0] activation_scale_q24;
+    reg signed [7:0] weight_q;
     reg [23:0] weight_scale_q24,output_scale_q24;reg signed [31:0] bias_q16;
     reg [$clog2(WDEPTH_BYTES)-1:0] byte_address;
     reg [$clog2(WWORDS)-1:0] word_address;reg [1:0] byte_lane,scale_lane;
@@ -47,25 +51,36 @@ module gptneo_resident_gemv #(
     endfunction
     always @(posedge clk) begin
         if(weight_we)image[weight_addr]<=weight_data;
-        if(rst)begin state<=IDLE;activation_ptr<=0;out_valid<=0;row<=0;column<=0;accumulator<=0;end
+        if(rst)begin state<=IDLE;activation_ptr<=0;out_valid<=0;raw_valid<=0;
+            row<=0;column<=0;accumulator<=0;end
         else begin
-            if(activation_valid&&activation_ready)begin activations[activation_ptr]<=activation_data;activation_ptr<=activation_ptr+1'b1;end
+            if(activation_valid&&activation_ready)begin activation_values[activation_ptr]<=activation_data_q16;
+                activation_ptr<=activation_ptr+1'b1;end
             case(state)
-                IDLE:if(start)begin row<=0;column<=0;accumulator<=0;out_valid<=0;state<=W_ADDR;end
-                W_ADDR:begin byte_address=matrix_base+row*row_stride+column;word_address<=byte_address>>2;byte_lane<=byte_address[1:0];state<=W_READ;end
-                W_READ:begin read_word<=image[word_address];state<=AS_ADDR;end
-                AS_ADDR:begin
-                    case(byte_lane)0:weight_q=read_word[7:0];1:weight_q=read_word[15:8];2:weight_q=read_word[23:16];default:weight_q=read_word[31:24];endcase
-                    activation_q<=activations[column];byte_address=input_scale_base+column*3;
-                    word_address<=byte_address>>2;scale_lane<=byte_address[1:0];state<=AS_READ0;end
-                AS_READ0:begin read_word<=image[word_address];state<=AS_READ1;end
-                AS_READ1:begin scale_low_word<=read_word;word_address<=word_address+1'b1;state<=AS_READ2;end
-                AS_READ2:begin read_word<=image[word_address];state<=AS_CAPTURE;end
-                AS_CAPTURE:begin
+                IDLE:if(raw_read)begin word_address<=raw_addr>>2;scale_lane<=raw_addr[1:0];state<=RAW_READ0;end
+                    else if(start)begin row<=0;column<=0;accumulator<=0;out_valid<=0;state<=Q_ADDR;end
+                Q_ADDR:begin byte_address=input_scale_base+column*3;word_address<=byte_address>>2;
+                    scale_lane<=byte_address[1:0];state<=Q_READ0;end
+                Q_READ0:begin read_word<=image[word_address];state<=Q_READ1;end
+                Q_READ1:begin scale_low_word<=read_word;word_address<=word_address+1'b1;state<=Q_READ2;end
+                Q_READ2:begin read_word<=image[word_address];state<=Q_CAPTURE;end
+                Q_CAPTURE:begin
                     scale_window={read_word,scale_low_word}>>(scale_lane*8);
-                    activation_scale_q24<=scale_window[23:0];state<=MAC;end
+                    numerator=$signed(activation_values[column])<<<8;
+                    magnitude=numerator<0?-numerator:numerator;
+                    qcode_wide=(magnitude+(scale_window[23:0]>>1))/$signed({1'b0,scale_window[23:0]});
+                    if(numerator<0)qcode_wide=-qcode_wide;
+                    if(qcode_wide>127)clipped_code=127;else if(qcode_wide< -128)clipped_code=-128;
+                    else clipped_code=qcode_wide;
+                    scaled_activations[column]<=clipped_code*$signed({1'b0,scale_window[23:0]});
+                    if(column==k_count-1)begin column<=0;state<=W_ADDR;end
+                    else begin column<=column+1'b1;state<=Q_ADDR;end
+                end
+                W_ADDR:begin byte_address=matrix_base+row*row_stride+column;word_address<=byte_address>>2;byte_lane<=byte_address[1:0];state<=W_READ;end
+                W_READ:begin read_word<=image[word_address];state<=MAC;end
                 MAC:begin
-                    accumulator<=accumulator+activation_q*weight_q*$signed({1'b0,activation_scale_q24});
+                    case(byte_lane)0:weight_q=read_word[7:0];1:weight_q=read_word[15:8];2:weight_q=read_word[23:16];default:weight_q=read_word[31:24];endcase
+                    accumulator<=accumulator+$signed(scaled_activations[column])*$signed(weight_q);
                     if(column==k_count-1)begin column<=0;state<=WS_ADDR;end else begin column<=column+1'b1;state<=W_ADDR;end
                 end
                 WS_ADDR:begin byte_address=weight_scale_base+row*3;word_address<=byte_address>>2;
@@ -105,6 +120,13 @@ module gptneo_resident_gemv #(
                 end
                 EMIT:if(out_ready)begin out_valid<=0;if(row==m_count-1)begin activation_ptr<=0;state<=IDLE;end
                     else begin row<=row+1'b1;accumulator<=0;state<=W_ADDR;end end
+                RAW_READ0:begin read_word<=image[word_address];state<=RAW_READ1;end
+                RAW_READ1:begin scale_low_word<=read_word;word_address<=word_address+1'b1;state<=RAW_READ2;end
+                RAW_READ2:begin read_word<=image[word_address];state<=RAW_RESP;end
+                RAW_RESP:begin scale_window={read_word,scale_low_word}>>(scale_lane*8);
+                    raw_data<=scale_window[31:0];raw_valid<=1;
+                    if(raw_ready)begin raw_valid<=0;state<=IDLE;end
+                end
                 default:state<=IDLE;
             endcase
         end

@@ -79,7 +79,7 @@ module gptneo_attention #(
                     accumulator<=0; dimension<=0;
                     if(time_index==position) begin
                         time_index<=0; exp_sum<=0; state<=EXP_READ;
-                    end else time_index<=time_index+1'b1;
+                    end else begin time_index<=time_index+1'b1; state<=SCORE_READ; end
                 end else begin
                     accumulator<=product_total; dimension<=dimension+1'b1; state<=SCORE_READ;
                 end
@@ -106,7 +106,7 @@ module gptneo_attention #(
                 state <= CTX_ACC;
             end
             CTX_ACC: begin
-                context_total = accumulator + $unsigned(probability_value) * $signed(v_value);
+                context_total = accumulator + $signed({1'b0, probability_value}) * $signed(v_value);
                 if(time_index==position) begin
                     if(context_total < 0) rounded_context = context_total - $signed(exp_sum>>>1);
                     else rounded_context = context_total + $signed(exp_sum>>>1);
