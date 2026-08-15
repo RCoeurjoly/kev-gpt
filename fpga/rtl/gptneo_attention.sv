@@ -44,6 +44,7 @@ module gptneo_attention #(
     reg [63:0] exp_sum;
     reg [20:0] exp_value;
     reg signed [95:0] context_total;
+    reg signed [95:0] rounded_context;
     reg signed [31:0] q_value, k_value, v_value;
     reg [20:0] probability_value;
 
@@ -107,7 +108,9 @@ module gptneo_attention #(
             CTX_ACC: begin
                 context_total = accumulator + $unsigned(probability_value) * $signed(v_value);
                 if(time_index==position) begin
-                    out_context <= (context_total + $signed(exp_sum>>>1)) / $signed(exp_sum);
+                    if(context_total < 0) rounded_context = context_total - $signed(exp_sum>>>1);
+                    else rounded_context = context_total + $signed(exp_sum>>>1);
+                    out_context <= rounded_context / $signed(exp_sum);
                     out_index <= head*HEAD_DIM+dimension;
                     out_valid<=1; state<=EMIT;
                 end else begin

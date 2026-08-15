@@ -33,6 +33,17 @@
           --package ${self}/model_packages/tinystories-1m \
           --output "$out"
       '';
+      hardwareQuality = pkgs.runCommand "tinystories-hardware-quality.json" {
+        nativeBuildInputs = [ python ];
+      } ''
+        export HF_HUB_OFFLINE=1
+        export TRANSFORMERS_OFFLINE=1
+        export PYTHONPATH=${self}
+        python -m tinystories.measure_hardware_quality \
+          --package ${self}/model_packages/tinystories-1m \
+          --source ${modelSource} \
+          --output "$out"
+      '';
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -100,6 +111,12 @@
           test -f ${rtlFixture}/model_image.mem
           touch $out
         '';
+
+        hardware-quality = pkgs.runCommand "hardware-quality-check" {} ''
+          test -s ${hardwareQuality}
+          grep -q '"passed": true' ${hardwareQuality}
+          touch $out
+        '';
       };
 
       lib.edaToolchain = compilerLab:
@@ -109,6 +126,7 @@
         tinystories-1m-source = modelSource;
         tinystories-1m-package-regenerated = regeneratedModelPackage;
         tinystories-rtl-fixture = rtlFixture;
+        tinystories-hardware-quality = hardwareQuality;
         gptneo-rtl-primitives-yosys-report = pkgs.runCommand "gptneo-rtl-primitives-yosys-report" {
           nativeBuildInputs = [ python pkgs.yosys ];
         } ''

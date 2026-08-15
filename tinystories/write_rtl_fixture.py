@@ -11,6 +11,8 @@ import struct
 
 import numpy as np
 
+from .hardware_reference import FixedGPTNeo
+
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -36,6 +38,16 @@ def _validate_package(package: pathlib.Path) -> tuple[dict, dict]:
 def _fixed(values: np.ndarray, fractional_bits: int) -> np.ndarray:
     scaled = np.rint(np.asarray(values, dtype=np.float64) * (1 << fractional_bits))
     return np.clip(scaled, -(1 << 31), (1 << 31) - 1).astype("<i4")
+
+
+def _packed_u24(values: np.ndarray) -> bytes:
+    fixed = _fixed(values, 24).astype(np.int64)
+    if np.any(fixed < 0) or np.any(fixed >= (1 << 24)):
+        raise ValueError("Q8.24 scale does not fit unsigned 24-bit storage")
+    result = bytearray()
+    for value in fixed:
+        result.extend(int(value).to_bytes(3, "little"))
+    return bytes(result)
 
 
 def _identifier(name: str) -> str:
@@ -66,7 +78,7 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
         weight_image[offset:offset + len(converted)] = converted
     if scale_image:
         scale_values = np.frombuffer(scale_image, dtype="<f4").copy()
-        scale_image[:] = _fixed(scale_values, 30).tobytes()
+        scale_image[:] = _packed_u24(scale_values)
 
     activation_image = bytearray()
     activation_descriptors = {}
@@ -75,22 +87,27 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
         activation_descriptors[name] = {
             "offset": len(activation_image), "count": int(values.size)
         }
-        activation_image.extend(_fixed(values, 30).tobytes())
+        activation_image.extend(_packed_u24(values))
 
     scale_base = len(weight_image)
     activation_base = scale_base + len(scale_image)
     resident_image = bytes(weight_image + scale_image + activation_image)
 
     regressions_document = json.loads((package / "regressions.json").read_text())
+    hardware_model = FixedGPTNeo(package)
     prompt_tokens = []
     expected_tokens = []
     regressions = []
     for case in regressions_document["regressions"]:
         record = dict(case)
+        record["quantized_output_ids"] = record.pop("output_ids")
+        record["output_ids"] = hardware_model.generate(
+            case["prompt_ids"], case["requested_tokens"]
+        )
         record["prompt_offset"] = len(prompt_tokens)
         record["expected_offset"] = len(expected_tokens)
         prompt_tokens.extend(case["prompt_ids"])
-        expected_tokens.extend(case["output_ids"])
+        expected_tokens.extend(record["output_ids"])
         regressions.append(record)
 
     if output.exists() and any(output.iterdir()):
@@ -117,7 +134,7 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
         prefix = f"GPTNEO_TENSOR_{_identifier(name)}"
         header.extend([
             f"localparam integer {prefix}_OFFSET = {descriptor['offset']};",
-            f"localparam integer {prefix}_SCALE_OFFSET = GPTNEO_SCALE_BASE + {descriptor['scale_offset']};",
+            f"localparam integer {prefix}_SCALE_OFFSET = GPTNEO_SCALE_BASE + {(int(descriptor['scale_offset'])//4)*3};",
             f"localparam integer {prefix}_BITS = {descriptor['bits']};",
         ])
     for name, descriptor in sorted(activation_descriptors.items()):
@@ -144,7 +161,9 @@ def write_rtl_fixture(package_dir: pathlib.Path, output_dir: pathlib.Path) -> di
     }
     document = {
         "schema_version": 1,
-        "numeric_formats": {"parameter": "q16.16", "scale": "q2.30"},
+        "numeric_formats": {
+            "parameter": "q16.16", "scale": "q8.24", "scale_storage_bits": 24
+        },
         "image_layout": {
             "weights_offset": 0, "weights_bytes": len(weight_image),
             "scales_offset": scale_base, "scales_bytes": len(scale_image),
