@@ -63,3 +63,6 @@ kevchat_*.png
 
 # Isolated feature worktrees
 /.worktrees/
+
+# Local Kintex bitstreams and physical-test receipts
+/artifacts/kintex-selftest/
