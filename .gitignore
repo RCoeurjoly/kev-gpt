@@ -66,3 +66,6 @@ kevchat_*.png
 
 # Local Kintex bitstreams and physical-test receipts
 /artifacts/kintex-selftest/
+/artifacts/tinystories/
+/data/huggingface/
+/result*
