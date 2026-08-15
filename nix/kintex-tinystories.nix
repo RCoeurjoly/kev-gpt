@@ -31,6 +31,7 @@ in pkgs.runCommand "tinystories-ypcb-${if interactive then "interactive" else "s
   ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${source}/fpga/rtl/gptneo_sequencer.sv ${source}/fpga/rtl/gptneo_layernorm.sv ${source}/fpga/rtl/gptneo_gelu.sv ${source}/fpga/rtl/gptneo_attention.sv ${source}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
   ${toolchain.nextpnr}/bin/nextpnr-xilinx \
     --chipdb ${toolchain.chipdb} \
+    --freq 50 \
     --xdc ${source}/fpga/constraints/kintex_selftest.xdc \
     --json design.json --fasm design.fasm > "$out/nextpnr.log" 2>&1
   export PYTHONPATH="${fasm}/lib/python3.12/site-packages:${python}/${pkgs.python312.sitePackages}:${prjxray}/usr/share/python3''${PYTHONPATH:+:$PYTHONPATH}"

@@ -21,6 +21,15 @@ class NixContractTest(unittest.TestCase):
         self.assertNotIn("circt", source.lower())
         self.assertNotIn("torchMlir", source)
 
+    def test_ypcb_constraints_match_top_ports_and_50mhz_clock(self):
+        constraints = (ROOT / "fpga/constraints/kintex_selftest.xdc").read_text()
+        self.assertIn("[get_ports {LED[0]}]", constraints)
+        self.assertIn("[get_ports {LED[1]}]", constraints)
+        self.assertIn("[get_ports {LED[2]}]", constraints)
+        self.assertNotIn("led_3bits_tri_o", constraints)
+        derivation = (ROOT / "nix/kintex-tinystories.nix").read_text()
+        self.assertIn("--freq 50", derivation)
+
 
 if __name__ == "__main__":
     unittest.main()
