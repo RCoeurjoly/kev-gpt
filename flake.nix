@@ -25,6 +25,14 @@
           --source ${modelSource} \
           --output "$out"
       '';
+      rtlFixture = pkgs.runCommand "tinystories-rtl-fixture" {
+        nativeBuildInputs = [ python ];
+      } ''
+        export PYTHONPATH=${self}
+        python -m tinystories.write_rtl_fixture \
+          --package ${self}/model_packages/tinystories-1m \
+          --output "$out"
+      '';
     in
     {
       devShells.${system}.default = pkgs.mkShell {
@@ -82,6 +90,16 @@
           python -m unittest -v tests/test_rtl_gates.py
           touch $out
         '';
+
+        rtl-fixture = pkgs.runCommand "rtl-fixture-check" {
+          nativeBuildInputs = [ python ];
+        } ''
+          cd ${self}
+          python -m unittest -v tests/test_rtl_fixture.py
+          test -f ${rtlFixture}/fixture.json
+          test -f ${rtlFixture}/model_image.mem
+          touch $out
+        '';
       };
 
       lib.edaToolchain = compilerLab:
@@ -90,6 +108,7 @@
       packages.${system} = {
         tinystories-1m-source = modelSource;
         tinystories-1m-package-regenerated = regeneratedModelPackage;
+        tinystories-rtl-fixture = rtlFixture;
         gptneo-rtl-primitives-yosys-report = pkgs.runCommand "gptneo-rtl-primitives-yosys-report" {
           nativeBuildInputs = [ python pkgs.yosys ];
         } ''

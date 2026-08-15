@@ -5,7 +5,7 @@
 module gptneo_resident_gemv #(
     parameter integer MMAX=50257,
     parameter integer KMAX=256,
-    parameter integer WDEPTH_BYTES=3852292,
+    parameter integer WDEPTH_BYTES=3889412,
     parameter WEIGHT_FILE=""
 ) (
     input wire clk,input wire rst,
