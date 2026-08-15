@@ -74,6 +74,14 @@
             ${regeneratedModelPackage}
           touch $out
         '';
+
+        rtl-primitives = pkgs.runCommand "rtl-primitives" {
+          nativeBuildInputs = [ python pkgs.iverilog ];
+        } ''
+          cd ${self}
+          python -m unittest -v tests/test_rtl_gates.py
+          touch $out
+        '';
       };
 
       lib.edaToolchain = compilerLab:
@@ -82,6 +90,18 @@
       packages.${system} = {
         tinystories-1m-source = modelSource;
         tinystories-1m-package-regenerated = regeneratedModelPackage;
+        gptneo-rtl-primitives-yosys-report = pkgs.runCommand "gptneo-rtl-primitives-yosys-report" {
+          nativeBuildInputs = [ python pkgs.yosys ];
+        } ''
+          mkdir work
+          cd work
+          python ${self}/tinystories/rtl_memories.py --output .
+          mkdir -p "$out"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_gelu.sv; synth_xilinx -family xc7 -top gptneo_gelu; stat' > "$out/gelu.log"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_layernorm.sv; synth_xilinx -family xc7 -top gptneo_layernorm; stat' > "$out/layernorm.log"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_attention.sv; synth_xilinx -family xc7 -top gptneo_attention; stat' > "$out/attention.log"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_resident_gemv; stat' > "$out/gemv.log"
+        '';
         default = modelSource;
       };
     };
