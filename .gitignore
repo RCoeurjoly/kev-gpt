@@ -60,3 +60,6 @@ CLAUDE.md
 .playwright-mcp/
 kev-*-verified.png
 kevchat_*.png
+
+# Isolated feature worktrees
+/.worktrees/
