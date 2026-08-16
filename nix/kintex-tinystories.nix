@@ -15,31 +15,59 @@ let
   familyDb = "${toolchain.nextpnr}/share/nextpnr/external/prjxray-db/kintex7";
   part = "xc7k480tffg1156-1";
   partFile = "${familyDb}/${part}/part.yaml";
-  modelPackage = source + "/model_packages/tinystories-1m";
+  buildSource = pkgs.lib.fileset.toSource {
+    root = source;
+    fileset = pkgs.lib.fileset.unions [
+      (source + "/fpga/rtl")
+      (source + "/fpga/constraints/kintex_selftest.xdc")
+      (source + "/model_packages/tinystories-1m")
+      (source + "/tinystories")
+      (source + "/scripts/run-logged.sh")
+    ];
+  };
+  modelPackage = buildSource + "/model_packages/tinystories-1m";
   top = if interactive then "tinystories_interactive_top" else "tinystories_selftest_top";
-  topSource = if interactive then "${source}/fpga/rtl/tinystories_interactive_top.sv ${source}/fpga/rtl/bscan_packet_endpoint.sv ${source}/fpga/rtl/async_fifo.sv ${source}/fpga/rtl/tinystories_packet_controller.sv" else "${source}/fpga/rtl/tinystories_selftest_top.sv";
+  topSource = if interactive then "${buildSource}/fpga/rtl/tinystories_interactive_top.sv ${buildSource}/fpga/rtl/bscan_packet_endpoint.sv ${buildSource}/fpga/rtl/async_fifo.sv ${buildSource}/fpga/rtl/tinystories_packet_controller.sv" else "${buildSource}/fpga/rtl/tinystories_selftest_top.sv";
   bitName = if interactive then "tinystories-interactive.bit" else "tinystories-selftest.bit";
-in pkgs.runCommand "tinystories-ypcb-${if interactive then "interactive" else "selftest"}-bitstream" {
+  name = "tinystories-ypcb-${if interactive then "interactive" else "selftest"}";
+  synthesis = pkgs.runCommand "${name}-synthesis" { } ''
+    set -euo pipefail
+    mkdir work "$out"
+    export PYTHONPATH=${buildSource}
+    ${python}/bin/python -m tinystories.write_rtl_fixture --package ${modelPackage} --output work/fixture
+    ${python}/bin/python ${buildSource}/tinystories/rtl_memories.py --output work/fixture
+    cd work/fixture
+    ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${buildSource}/fpga/rtl/gptneo_sequencer.sv ${buildSource}/fpga/rtl/gptneo_layernorm.sv ${buildSource}/fpga/rtl/gptneo_gelu.sv ${buildSource}/fpga/rtl/gptneo_attention.sv ${buildSource}/fpga/rtl/gptneo_iterative_divider.sv ${buildSource}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
+    cp design.json "$out/"
+    cp gptneo_package.svh "$out/"
+  '';
+  # The locked nextpnr hierarchical frontend has a latent merge_nets bug when
+  # two submodule ports alias one net.  Normalize the cached synthesis result
+  # to a flat JSON netlist so P&R never enters that importer path.
+  pnrNetlist = pkgs.runCommand "${name}-pnr-netlist" { } ''
+    mkdir "$out"
+    ${yosys}/bin/yosys -l "$out/flatten.log" -p \
+      'read_json ${synthesis}/design.json; flatten; write_json design.json'
+    cp design.json "$out/"
+  '';
+in pkgs.runCommand "${name}-bitstream" {
   nativeBuildInputs = [ fasm prjxray python ];
+  passthru = { inherit synthesis pnrNetlist; };
 } ''
   set -euo pipefail
   mkdir work "$out"
-  export PYTHONPATH=${source}
-  ${python}/bin/python -m tinystories.write_rtl_fixture --package ${modelPackage} --output work/fixture
-  ${python}/bin/python ${source}/tinystories/rtl_memories.py --output work/fixture
-  cd work/fixture
-  ${yosys}/bin/yosys -l "$out/yosys.log" -p 'read_verilog -sv -I. ${topSource} ${source}/fpga/rtl/gptneo_sequencer.sv ${source}/fpga/rtl/gptneo_layernorm.sv ${source}/fpga/rtl/gptneo_gelu.sv ${source}/fpga/rtl/gptneo_attention.sv ${source}/fpga/rtl/gptneo_iterative_divider.sv ${source}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top ${top}; write_json design.json'
-  bash ${source}/scripts/run-logged.sh "$out/nextpnr.log" \
+  cd work
+  bash ${buildSource}/scripts/run-logged.sh "$out/nextpnr.log" \
     ${toolchain.nextpnr}/bin/nextpnr-xilinx \
     --chipdb ${toolchain.chipdb} \
     --freq 50 \
-    --xdc ${source}/fpga/constraints/kintex_selftest.xdc \
-    --json design.json --fasm design.fasm
+    --xdc ${buildSource}/fpga/constraints/kintex_selftest.xdc \
+    --json ${pnrNetlist}/design.json --fasm design.fasm
   export PYTHONPATH="${fasm}/lib/python3.12/site-packages:${python}/${pkgs.python312.sitePackages}:${prjxray}/usr/share/python3''${PYTHONPATH:+:$PYTHONPATH}"
   export PRJXRAY_DB_DIR="${familyDb}"
   export PRJXRAY_PYTHON_DIR="${prjxray}/usr/share/python3"
   fasm2frames --db-root "${familyDb}" --part ${part} design.fasm design.frm
   xc7frames2bit --part_file "${partFile}" --frm_file design.frm --output_file "$out/${bitName}"
-  cp gptneo_package.svh "$out/"
+  cp ${synthesis}/gptneo_package.svh "$out/"
   printf '%s\n' '{"cable":"digilent_hs3","idcode":"0x23751093","part":"${part}","bitstream":"${bitName}"}' > "$out/board-command.json"
 ''

@@ -5,13 +5,17 @@ module tb_gptneo_sequencer;
   reg rst=1,clear=0,prompt_valid=0,start=0,token_ready=1;
   reg [15:0] prompt_token=0;reg [5:0] requested_tokens=0;reg [31:0] package_tag=0;
   wire prompt_ready,token_valid,busy,error;wire [15:0] token_id;wire [7:0] error_code;
+  wire [62:0] debug_status;
+  wire [95:0] debug_embedding;
+  wire [95:0] debug_layernorm;
   reg [15:0] prompts[0:63],expected[0:63];
   integer observed;
 `ifdef GPTNEO_DEBUG_EMB
   integer debug_i;reg debug_seen=0;
   always @(posedge clk) if(!debug_seen && dut.state==dut.LN_G_REQ && dut.layer==0 &&
     dut.position==0 && dut.index==0 && !dut.ln_is_second && !dut.ln_is_final)begin
-    debug_seen=1;for(debug_i=0;debug_i<64;debug_i=debug_i+1)
+    debug_seen=1;$display("DEBUG_EMBEDDING %024x",debug_embedding);
+    for(debug_i=0;debug_i<64;debug_i=debug_i+1)
       $display("DEBUG_X %0d %0d",debug_i,dut.xmem[debug_i]);
     $finish;
   end
@@ -77,6 +81,17 @@ module tb_gptneo_sequencer;
     $finish;
   end
 `endif
+`ifdef GPTNEO_CHECK_LN_FEED
+  reg ln_feed_checked=0;
+  always @(posedge clk) if(!ln_feed_checked && dut.state==dut.LN_START &&
+    dut.layer==0 && dut.position==0 && !dut.ln_is_second && !dut.ln_is_final)begin
+    ln_feed_checked=1;
+    if(dut.layernorm.xmem[0]!==dut.xmem[0])
+      $fatal(1,"LN_FEED_MISMATCH captured=%0d expected=%0d",
+        dut.layernorm.xmem[0],dut.xmem[0]);
+    $display("LN_FEED_MATCH value=%0d",dut.xmem[0]);$finish;
+  end
+`endif
   gptneo_sequencer dut(.*);
 
   task reset_case;begin clear<=1;@(posedge clk);clear<=0;repeat(2)@(posedge clk);end endtask
@@ -96,6 +111,10 @@ module tb_gptneo_sequencer;
       $display("GPTNEO_SEQ_PROGRESS case=%0d token=%0d/%0d",case_id,observed,elen);
     end
     while(busy)@(posedge clk);
+    if(case_id==0 && debug_embedding!==96'h690046dd000027dd000044ee)
+      $fatal(1,"case=0 embedding probe got=%024x",debug_embedding);
+    if(case_id==0 && debug_layernorm!==96'h00021c770001eb4300021048)
+      $fatal(1,"case=0 layernorm probe got=%024x",debug_layernorm);
     $display("GPTNEO_SEQ_PASS case=%0d tokens=%0d/%0d",case_id,observed,elen);
   end endtask
   initial begin

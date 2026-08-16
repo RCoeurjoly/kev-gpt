@@ -4,6 +4,7 @@
 // reused across all eight layers and all sequence positions so the complete
 // pretrained model remains resident in the XC7K480T block RAM budget.
 module gptneo_sequencer #(
+    parameter CHECK_PACKAGE_TAG=1,
     parameter integer TMAX=32,
     parameter integer D=64,
     parameter integer HIDDEN=256,
@@ -17,7 +18,9 @@ module gptneo_sequencer #(
     input wire prompt_valid,output wire prompt_ready,input wire [15:0] prompt_token,
     input wire start,input wire [5:0] requested_tokens,input wire [31:0] package_tag,
     output reg token_valid,input wire token_ready,output reg [15:0] token_id,
-    output wire busy,output reg error,output reg [7:0] error_code
+    output wire busy,output reg error,output reg [7:0] error_code,
+    output wire [62:0] debug_status,output reg [95:0] debug_embedding,
+    output wire [95:0] debug_layernorm
 );
 `include "gptneo_package.svh"
     localparam ERR_PACKAGE_HASH=8'd1,ERR_CONTEXT=8'd2;
@@ -62,7 +65,7 @@ module gptneo_sequencer #(
     reg signed [31:0] attn_q,attn_k,attn_v;wire [5:0] attn_out_index;
     wire signed [31:0] attn_out_context;
     reg gelu_in_valid;wire gelu_in_ready,gelu_out_valid;reg signed [15:0] gelu_in_data;
-    wire signed [15:0] gelu_out_data;
+    wire signed [15:0] gelu_out_data;wire [1:0] gelu_debug_state;
 
     wire [21:0] layer_base=layer*LAYER_BYTES;
     wire [21:0] layer_scale=GPTNEO_SCALE_BASE+layer*LAYER_SCALE_BYTES;
@@ -113,7 +116,7 @@ module gptneo_sequencer #(
     gptneo_layernorm #(.D(D)) layernorm(.clk(clk),.rst(rst),.in_valid(ln_in_valid),
       .in_ready(ln_in_ready),.in_x(ln_x),.in_gamma(ln_gamma),.in_beta(ln_beta),
       .start(ln_start),.out_valid(ln_out_valid),.out_ready(1'b1),.out_index(ln_out_index),
-      .out_y(ln_y),.busy(ln_busy));
+      .out_y(ln_y),.busy(ln_busy),.debug_status(debug_layernorm));
     gptneo_attention #(.D(D),.TMAX(TMAX),.EXP_FILE(EXP_FILE)) attention(.clk(clk),.rst(rst),
       .cache_reset(attn_cache_reset),.start(attn_start),.position(position),
       .in_valid(attn_in_valid),.in_ready(attn_in_ready),.in_q(attn_q),.in_k(attn_k),
@@ -121,10 +124,15 @@ module gptneo_sequencer #(
       .out_index(attn_out_index),.out_context(attn_out_context),.busy(attn_busy));
     gptneo_gelu #(.LUT_FILE(GELU_FILE)) gelu(.clk(clk),.rst(rst),.in_valid(gelu_in_valid),
       .in_ready(gelu_in_ready),.in_data(gelu_in_data),.out_valid(gelu_out_valid),
-      .out_ready(1'b1),.out_data(gelu_out_data));
+      .out_ready(1'b1),.out_data(gelu_out_data),.debug_state(gelu_debug_state));
 
     assign prompt_ready=(state==IDLE)&&!start&&(token_count<TMAX);
     assign busy=(state!=IDLE);
+    // LSB-first USER2 diagnostic layout: state, layer, position, index,
+    // GEMV operation/output index, sub-engine busy flags and token counters.
+    assign debug_status={gelu_out_valid,gelu_in_ready,gelu_debug_state,
+      generated_count,token_count,attn_busy,ln_busy,
+      gemv_busy,gemv_out_index,gemv_op,index,position,layer,state};
     function automatic signed [31:0] round_scale;
       input signed [7:0] code;input [23:0] scale;reg signed [39:0] product,mag;begin
         product=code*$signed({1'b0,scale});mag=product<0?-product:product;
@@ -142,13 +150,14 @@ module gptneo_sequencer #(
       ln_in_valid<=0;ln_start<=0;attn_start<=0;attn_cache_reset<=0;attn_in_valid<=0;
       gelu_in_valid<=0;
       if(rst||clear)begin state<=IDLE;token_count<=0;generated_count<=0;token_valid<=0;
-        error<=0;error_code<=0;index<=0;position<=0;layer<=0;end
+        error<=0;error_code<=0;index<=0;position<=0;layer<=0;
+        debug_embedding<=0;end
       else begin
         if(prompt_valid&&prompt_ready)begin tokens[token_count]<=prompt_token;token_count<=token_count+1'b1;end
         case(state)
           IDLE:if(start)begin
             token_valid<=0;error<=0;generated_count<=0;target_count<=requested_tokens;
-            if(package_tag!=GPTNEO_PACKAGE_TAG)begin error<=1;error_code<=ERR_PACKAGE_HASH;state<=ERROR_HOLD;end
+            if(CHECK_PACKAGE_TAG&&package_tag!=GPTNEO_PACKAGE_TAG)begin error<=1;error_code<=ERR_PACKAGE_HASH;state<=ERROR_HOLD;end
             else if(token_count==0||token_count+requested_tokens>TMAX)begin error<=1;error_code<=ERR_CONTEXT;state<=ERROR_HOLD;end
             else begin position<=0;index<=0;state<=EMB_CODE_REQ;end
           end
@@ -169,6 +178,9 @@ module gptneo_sequencer #(
             gemv_raw_read<=1;state<=POS_SCALE_WAIT;end
           POS_SCALE_WAIT:if(gemv_raw_valid)begin
             xmem[position*D+index]<=token_component+round_scale(position_code,gemv_raw_data[23:0]);
+            if(position==0&&index==0)debug_embedding<=
+              {position_code,gemv_raw_data[23:0],token_component,
+               token_component+round_scale(position_code,gemv_raw_data[23:0])};
             gemv_raw_ready<=1;
             if(index==D-1)begin index<=0;if(position==token_count-1)begin position<=0;layer<=0;
               attn_cache_reset<=1;ln_is_second<=0;ln_is_final<=0;state<=LN_G_REQ;end

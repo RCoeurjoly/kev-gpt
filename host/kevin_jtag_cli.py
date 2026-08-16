@@ -208,6 +208,51 @@ def infer_tokens(transport, tokens, generated: int, timeout_s: float = 30.0):
     return reply
 
 
+def read_debug_snapshot(transport, timeout_s: float = 3.0):
+    data = bytearray(transport.exchange(b"?", 1, 1000))
+    deadline = time.monotonic() + timeout_s
+    while True:
+        marker = data.find(b"DBG1")
+        if marker >= 0 and len(data) >= marker + 44:
+            payload = data[marker + 4:marker + 44]
+            return {
+                "cycles": int.from_bytes(payload[0:4], "little"),
+                "sequencer_state": payload[4] & 0x7f,
+                "layer": payload[5] & 0x7,
+                "position": payload[6] & 0x3f,
+                "index": payload[7] | ((payload[8] & 1) << 8),
+                "gemv_operation": payload[9] & 0x7,
+                "gemv_output_index": payload[10] | (payload[11] << 8),
+                "gemv_busy": bool(payload[12] & 1),
+                "layernorm_busy": bool(payload[12] & 2),
+                "attention_busy": bool(payload[12] & 4),
+                "token_count": payload[13] & 0x3f,
+                "generated_count": payload[14] & 0x3f,
+                "gelu_state": payload[15] & 0x3,
+                "gelu_ready": bool(payload[15] & 0x4),
+                "gelu_valid": bool(payload[15] & 0x8),
+                "sequencer_error": bool(payload[15] & 0x10),
+                "embedding_x_q16": int.from_bytes(payload[16:20], "little", signed=True),
+                "embedding_token_component_q16": int.from_bytes(
+                    payload[20:24], "little", signed=True
+                ),
+                "embedding_position_scale_q24": int.from_bytes(payload[24:27], "little"),
+                "embedding_position_code": int.from_bytes(payload[27:28], "little", signed=True),
+                "layernorm_y0_q16": int.from_bytes(payload[28:32], "little", signed=True),
+                "layernorm_normalized0_q16": int.from_bytes(
+                    payload[32:36], "little", signed=True
+                ),
+                "layernorm_affine0_q16": int.from_bytes(
+                    payload[36:40], "little", signed=True
+                ),
+            }
+        if time.monotonic() >= deadline:
+            raise TimeoutError("FPGA debug snapshot timed out")
+        data.extend(transport.exchange(bytes(64), 64, 1000))
+        if len(data) > 256:
+            del data[:-256]
+
+
 def load_tokenizer(package: str | Path):
     """Load only the pinned tokenizer assets from a canonical model package."""
     from transformers import AutoTokenizer
@@ -279,6 +324,12 @@ def _infer_command(args) -> None:
         receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
 
 
+def _debug_command(args) -> None:
+    with NativeTransport(serial=args.serial) as transport:
+        snapshot = read_debug_snapshot(transport, args.timeout)
+    print(json.dumps(snapshot, indent=2, sort_keys=True))
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     subcommands = parser.add_subparsers(dest="command", required=True)
@@ -297,6 +348,9 @@ def main(argv: list[str] | None = None) -> int:
     infer.add_argument("--program", metavar="BITSTREAM")
     infer.add_argument("--cable", default="digilent_hs3")
     infer.add_argument("--json-receipt")
+    debug = subcommands.add_parser("debug", help="read an in-flight FPGA state snapshot")
+    debug.add_argument("--serial")
+    debug.add_argument("--timeout", type=float, default=3.0)
     args = parser.parse_args(argv)
     if args.command == "packet-selftest":
         _packet_selftest()
@@ -304,6 +358,8 @@ def main(argv: list[str] | None = None) -> int:
         program_bitstream(args.bitstream, args.cable)
     elif args.command == "infer":
         _infer_command(args)
+    elif args.command == "debug":
+        _debug_command(args)
     return 0
 
 

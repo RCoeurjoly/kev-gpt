@@ -10,6 +10,7 @@ module tb_gptneo_gelu;
     wire out_valid;
     reg out_ready = 0;
     wire signed [15:0] out_data;
+    wire [1:0] debug_state;
 
     gptneo_gelu dut (.*);
 

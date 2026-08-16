@@ -12,7 +12,8 @@ module gptneo_gelu #(
     input  wire signed [15:0] in_data,
     output reg                out_valid,
     input  wire               out_ready,
-    output reg signed [15:0]  out_data
+    output reg signed [15:0]  out_data,
+    output wire [1:0] debug_state
 );
     (* rom_style = "block" *) reg signed [15:0] lut [0:8191];
     initial $readmemh(LUT_FILE, lut);
@@ -27,6 +28,7 @@ module gptneo_gelu #(
     wire [15:0] biased = in_data + 16'h8000;
 
     assign in_ready = (state == IDLE);
+    assign debug_state = state;
 
     always @(posedge clk) begin
         if (rst) begin

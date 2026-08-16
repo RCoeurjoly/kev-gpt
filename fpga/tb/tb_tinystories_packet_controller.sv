@@ -5,6 +5,8 @@ module tb_tinystories_packet_controller;
   wire [7:0] tx_data;wire [15:0] prompt_token;wire [5:0] requested_tokens;
   reg seq_token_valid=0,seq_busy=0,seq_error=0;reg [15:0] seq_token_id=0;
   reg [7:0] seq_error_code=0;wire seq_token_ready;
+  reg [62:0] seq_debug_status=0;reg [95:0] seq_debug_embedding=0;
+  reg [95:0] seq_debug_layernorm=0;
   reg [7:0] request[0:13],reply[0:31];integer i,reply_count=0,fake_state=0;
   reg [31:0] crc;
   always #5 clk=~clk;
@@ -15,7 +17,8 @@ module tb_tinystories_packet_controller;
     .prompt_token(prompt_token),.seq_start(seq_start),.requested_tokens(requested_tokens),
     .seq_token_valid(seq_token_valid),.seq_token_ready(seq_token_ready),
     .seq_token_id(seq_token_id),.seq_busy(seq_busy),.seq_error(seq_error),
-    .seq_error_code(seq_error_code));
+    .seq_error_code(seq_error_code),.seq_debug_status(seq_debug_status),
+    .seq_debug_embedding(seq_debug_embedding),.seq_debug_layernorm(seq_debug_layernorm));
   function automatic [31:0] crc_byte;input [31:0] old;input [7:0] byte_value;
     integer bitno;reg [31:0] value;begin value=old^byte_value;
       for(bitno=0;bitno<8;bitno=bitno+1)

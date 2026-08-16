@@ -8,6 +8,7 @@ module tb_gptneo_layernorm;
     wire in_ready,out_valid,busy;
     wire [$clog2(D)-1:0] out_index;
     wire signed [31:0] out_y;
+    wire [95:0] debug_status;
     gptneo_layernorm #(.D(D)) dut(.*);
 
     task put; input integer x; input integer gamma; input integer beta; begin

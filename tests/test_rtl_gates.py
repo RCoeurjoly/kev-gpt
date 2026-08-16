@@ -12,6 +12,35 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class RTLPrimitiveGateTest(unittest.TestCase):
+    def test_production_top_elides_redundant_physical_package_tag_compare(self):
+        sequencer = (ROOT / "fpga/rtl/gptneo_sequencer.sv").read_text()
+        top = (ROOT / "fpga/rtl/tinystories_interactive_top.sv").read_text()
+        self.assertIn("parameter CHECK_PACKAGE_TAG=1", sequencer)
+        self.assertIn("CHECK_PACKAGE_TAG&&package_tag!=GPTNEO_PACKAGE_TAG", sequencer)
+        self.assertIn(".CHECK_PACKAGE_TAG(1'b0)", top)
+
+    def test_production_top_exposes_read_only_in_band_debug_snapshot(self):
+        top = (ROOT / "fpga/rtl/tinystories_interactive_top.sv").read_text()
+        controller = (ROOT / "fpga/rtl/tinystories_packet_controller.sv").read_text()
+        gelu = (ROOT / "fpga/rtl/gptneo_gelu.sv").read_text()
+        self.assertIn(".seq_debug_status(seq_debug)", top)
+        self.assertIn("8'h3f", controller)
+        self.assertIn("8'h44", controller)
+        self.assertIn("output wire [1:0] debug_state", gelu)
+        self.assertIn("gelu_out_valid,gelu_in_ready,gelu_debug_state", (ROOT / "fpga/rtl/gptneo_sequencer.sv").read_text())
+        self.assertNotIn("bscan_debug_snapshot", top)
+
+    def test_layernorm_uses_the_iterative_divider(self):
+        layernorm = (ROOT / "fpga/rtl/gptneo_layernorm.sv").read_text()
+        self.assertIn("gptneo_iterative_divider norm_divider", layernorm)
+        self.assertNotIn("norm_numerator /", layernorm)
+
+    def test_kintex_pnr_flattens_cached_synthesis_before_nextpnr(self):
+        nix = (ROOT / "nix/kintex-tinystories.nix").read_text()
+        self.assertIn('pnrNetlist = pkgs.runCommand', nix)
+        self.assertIn('read_json ${synthesis}/design.json; flatten; write_json design.json', nix)
+        self.assertIn('--json ${pnrNetlist}/design.json', nix)
+
     CASES = {
         "iterative_divider": "GPTNEO_DIVIDER_PASS",
         "layernorm": "GPTNEO_LAYERNORM_PASS",
@@ -32,7 +61,7 @@ class RTLPrimitiveGateTest(unittest.TestCase):
                     write_exp_lut(pathlib.Path(temporary))
                 executable = pathlib.Path(temporary) / name
                 sources = [rtl]
-                if name in {"attention", "gemv"}:
+                if name in {"attention", "gemv", "layernorm"}:
                     sources.append(ROOT / "fpga/rtl/gptneo_iterative_divider.sv")
                 compile_result = subprocess.run(
                     ["iverilog", "-g2012", "-s", f"tb_gptneo_{name}", "-o", executable, *sources, testbench],

@@ -7,7 +7,8 @@ module tinystories_packet_controller(
   output wire [5:0] requested_tokens,
   input wire seq_token_valid,output wire seq_token_ready,
   input wire [15:0] seq_token_id,input wire seq_busy,input wire seq_error,
-  input wire [7:0] seq_error_code
+  input wire [7:0] seq_error_code,input wire [62:0] seq_debug_status,
+  input wire [95:0] seq_debug_embedding,input wire [95:0] seq_debug_layernorm
 );
   localparam RX=4'd0,CLEAR=4'd1,LOAD=4'd2,START=4'd3,RUN=4'd4,
              BUILD=4'd5,CRC_WRITE=4'd6,SEND=4'd7;
@@ -24,10 +25,55 @@ module tinystories_packet_controller(
   reg [31:0] request_crc=32'hffffffff,reply_crc=32'hffffffff,final_crc=0;
   reg [63:0] cycle_count=0;
   reg saw_busy=0;
+  reg diagnostic_sending=0;reg [6:0] diagnostic_index=0;
 
-  assign rx_ready=(state==RX);
-  assign tx_valid=(state==SEND);
-  assign tx_data=reply[send_index];
+  assign rx_ready=(state==RX)||(state==RUN&&!diagnostic_sending);
+  assign tx_valid=diagnostic_sending||(state==SEND);
+  function automatic [7:0] diagnostic_byte;
+    input [6:0] which;begin case(which)
+      0:diagnostic_byte=8'h44;1:diagnostic_byte=8'h42;
+      2:diagnostic_byte=8'h47;3:diagnostic_byte=8'h31;
+      4:diagnostic_byte=cycle_count[7:0];5:diagnostic_byte=cycle_count[15:8];
+      6:diagnostic_byte=cycle_count[23:16];7:diagnostic_byte=cycle_count[31:24];
+      8:diagnostic_byte={1'b0,seq_debug_status[6:0]};
+      9:diagnostic_byte={5'b0,seq_debug_status[9:7]};
+      10:diagnostic_byte={2'b0,seq_debug_status[15:10]};
+      11:diagnostic_byte=seq_debug_status[23:16];
+      12:diagnostic_byte={7'b0,seq_debug_status[24]};
+      13:diagnostic_byte={5'b0,seq_debug_status[27:25]};
+      14:diagnostic_byte=seq_debug_status[35:28];
+      15:diagnostic_byte=seq_debug_status[43:36];
+      16:diagnostic_byte={5'b0,seq_debug_status[46:44]};
+      17:diagnostic_byte={2'b0,seq_debug_status[52:47]};
+      18:diagnostic_byte={2'b0,seq_debug_status[58:53]};
+      19:diagnostic_byte={3'b0,seq_error,seq_debug_status[62:59]};
+      20:diagnostic_byte=seq_debug_embedding[7:0];
+      21:diagnostic_byte=seq_debug_embedding[15:8];
+      22:diagnostic_byte=seq_debug_embedding[23:16];
+      23:diagnostic_byte=seq_debug_embedding[31:24];
+      24:diagnostic_byte=seq_debug_embedding[39:32];
+      25:diagnostic_byte=seq_debug_embedding[47:40];
+      26:diagnostic_byte=seq_debug_embedding[55:48];
+      27:diagnostic_byte=seq_debug_embedding[63:56];
+      28:diagnostic_byte=seq_debug_embedding[71:64];
+      29:diagnostic_byte=seq_debug_embedding[79:72];
+      30:diagnostic_byte=seq_debug_embedding[87:80];
+      31:diagnostic_byte=seq_debug_embedding[95:88];
+      32:diagnostic_byte=seq_debug_layernorm[7:0];
+      33:diagnostic_byte=seq_debug_layernorm[15:8];
+      34:diagnostic_byte=seq_debug_layernorm[23:16];
+      35:diagnostic_byte=seq_debug_layernorm[31:24];
+      36:diagnostic_byte=seq_debug_layernorm[39:32];
+      37:diagnostic_byte=seq_debug_layernorm[47:40];
+      38:diagnostic_byte=seq_debug_layernorm[55:48];
+      39:diagnostic_byte=seq_debug_layernorm[63:56];
+      40:diagnostic_byte=seq_debug_layernorm[71:64];
+      41:diagnostic_byte=seq_debug_layernorm[79:72];
+      42:diagnostic_byte=seq_debug_layernorm[87:80];
+      default:diagnostic_byte=seq_debug_layernorm[95:88];
+    endcase end
+  endfunction
+  assign tx_data=diagnostic_sending?diagnostic_byte(diagnostic_index):reply[send_index];
   assign seq_clear=(state==CLEAR);
   assign prompt_valid=(state==LOAD);
   assign prompt_token={packet[7+(load_index<<1)],packet[6+(load_index<<1)]};
@@ -71,8 +117,13 @@ module tinystories_packet_controller(
   always @(posedge clk)begin
     if(rst)begin
       state<=RX;rx_index<=0;expected_length<=0;request_crc<=32'hffffffff;
-      output_count<=0;cycle_count<=0;saw_busy<=0;
-    end else case(state)
+      output_count<=0;cycle_count<=0;saw_busy<=0;diagnostic_sending<=0;
+    end else begin
+      if(diagnostic_sending&&tx_ready)begin
+        if(diagnostic_index==43)diagnostic_sending<=0;
+        else diagnostic_index<=diagnostic_index+1'b1;
+      end
+      case(state)
       RX:if(rx_valid)begin
         if(rx_index==0)begin
           if(rx_data==8'h47)begin packet[0]<=rx_data;rx_index<=1;
@@ -114,6 +165,9 @@ module tinystories_packet_controller(
       START:begin cycle_count<=0;saw_busy<=0;state<=RUN;end
       RUN:begin
         cycle_count<=cycle_count+1'b1;
+        if(rx_valid&&rx_data==8'h3f&&!diagnostic_sending)begin
+          diagnostic_index<=0;diagnostic_sending<=1;
+        end
         if(seq_busy)saw_busy<=1;
         if(seq_token_valid&&seq_token_ready)begin
           outputs[output_count]<=seq_token_id;output_count<=output_count+1'b1;
@@ -140,6 +194,7 @@ module tinystories_packet_controller(
         end else send_index<=send_index+1'b1;
       end
       default:state<=RX;
-    endcase
+      endcase
+    end
   end
 endmodule

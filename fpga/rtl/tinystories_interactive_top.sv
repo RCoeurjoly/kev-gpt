@@ -8,6 +8,9 @@ module tinystories_interactive_top(
   wire seq_clear,prompt_valid,prompt_ready,seq_start,seq_token_valid;
   wire seq_token_ready,seq_busy,seq_error;wire [15:0] prompt_token,seq_token_id;
   wire [5:0] requested_tokens;wire [7:0] seq_error_code;
+  wire [62:0] seq_debug;
+  wire [95:0] seq_debug_embedding;
+  wire [95:0] seq_debug_layernorm;
   always @(posedge SYS_CLK)begin
     if(reset)begin heartbeat<=0;failure<=0;end
     else begin heartbeat<=heartbeat+1'b1;if(seq_error)failure<=1;end
@@ -24,11 +27,14 @@ module tinystories_interactive_top(
     .prompt_token(prompt_token),.seq_start(seq_start),.requested_tokens(requested_tokens),
     .seq_token_valid(seq_token_valid),.seq_token_ready(seq_token_ready),
     .seq_token_id(seq_token_id),.seq_busy(seq_busy),.seq_error(seq_error),
-    .seq_error_code(seq_error_code));
-  gptneo_sequencer sequencer(
+    .seq_error_code(seq_error_code),.seq_debug_status(seq_debug),
+    .seq_debug_embedding(seq_debug_embedding),.seq_debug_layernorm(seq_debug_layernorm));
+  gptneo_sequencer #(.CHECK_PACKAGE_TAG(1'b0)) sequencer(
     .clk(SYS_CLK),.rst(reset),.clear(seq_clear),.prompt_valid(prompt_valid),
     .prompt_ready(prompt_ready),.prompt_token(prompt_token),.start(seq_start),
     .requested_tokens(requested_tokens),.package_tag(GPTNEO_PACKAGE_TAG),
     .token_valid(seq_token_valid),.token_ready(seq_token_ready),.token_id(seq_token_id),
-    .busy(seq_busy),.error(seq_error),.error_code(seq_error_code));
+    .busy(seq_busy),.error(seq_error),.error_code(seq_error_code),
+    .debug_status(seq_debug),.debug_embedding(seq_debug_embedding),
+    .debug_layernorm(seq_debug_layernorm));
 endmodule

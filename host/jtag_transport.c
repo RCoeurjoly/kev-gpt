@@ -12,6 +12,7 @@
  * edge, and sampled on its rising edge, matching Xilinx JTAG timing. */
 enum {
     MPSSE_SET_LOW = 0x80,
+    MPSSE_SET_HIGH = 0x82,
     MPSSE_DIVISOR = 0x86,
     MPSSE_DISABLE_DIV5 = 0x8a,
     MPSSE_DISABLE_3PHASE = 0x8d,
@@ -76,7 +77,7 @@ static int tms(unsigned count, uint8_t bits, int tdi) {
     return write_all(command, sizeof(command));
 }
 
-static int select_user1(void) {
+static int select_user(unsigned chain) {
     int result;
     /* Test-Logic-Reset, Run-Test/Idle. */
     if ((result = tms(6, 0x1f, 0)) < 0)
@@ -84,9 +85,13 @@ static int select_user1(void) {
     /* Idle -> Select-DR -> Select-IR -> Capture-IR -> Shift-IR. */
     if ((result = tms(4, 0x03, 0)) < 0)
         return result;
-    /* XC7 USER1 is the six-bit instruction 000010, shifted LSB first. The
+    /* XC7 USER1/USER2 are six-bit instructions 000010/000011, LSB first. The
      * sixth bit is clocked together with TMS=1 to leave Shift-IR. */
-    uint8_t first_five[3] = {MPSSE_BITS_OUT_LSB_NEG, 4, 0x02};
+    if (chain != 1 && chain != 2)
+        return fail(EINVAL, "invalid USER JTAG chain");
+    uint8_t first_five[3] = {
+        MPSSE_BITS_OUT_LSB_NEG, 4, (uint8_t)(chain == 1 ? 0x02 : 0x03)
+    };
     if ((result = write_all(first_five, sizeof(first_five))) < 0)
         return result;
     if ((result = tms(1, 0x01, 0)) < 0)
@@ -124,7 +129,11 @@ int kj_open(const char *serial) {
     uint8_t setup[] = {
         MPSSE_DISABLE_DIV5, MPSSE_DISABLE_ADAPTIVE, MPSSE_DISABLE_3PHASE,
         MPSSE_DIVISOR, 4, 0, /* 60 MHz / (2 * (4 + 1)) = 6 MHz. */
-        MPSSE_SET_LOW, 0x08, 0x0b, /* TMS high; TCK/TDI/TMS outputs. */
+        /* Digilent HS3 buffer enables and directions, matching the locked
+         * openFPGALoader cable definition.  Bit 7 enables the low-port JTAG
+         * drivers; high-port bits 4/5 control the remaining HS3 buffers. */
+        MPSSE_SET_LOW, 0x88, 0x8b,
+        MPSSE_SET_HIGH, 0x20, 0x30,
     };
     if (write_all(setup, sizeof(setup)) < 0) {
         kj_close();
@@ -135,8 +144,8 @@ int kj_open(const char *serial) {
     return 0;
 }
 
-int kj_user1_exchange(const uint8_t *tx, size_t tx_len,
-                      uint8_t *rx, size_t rx_cap, unsigned timeout_ms) {
+static int user_exchange(unsigned chain, const uint8_t *tx, size_t tx_len,
+                         uint8_t *rx, size_t rx_cap, unsigned timeout_ms) {
     if (!device)
         return fail(ENODEV, "transport is not open");
     if ((!tx && tx_len) || (!rx && rx_cap) || (tx_len == 0 && rx_cap == 0) ||
@@ -152,7 +161,7 @@ int kj_user1_exchange(const uint8_t *tx, size_t tx_len,
     if (tx_len)
         memcpy(out, tx, tx_len);
     ftdi_tciflush(device);
-    int result = select_user1();
+    int result = select_user(chain);
     /* Idle -> Select-DR -> Capture-DR -> Shift-DR. */
     if (result >= 0)
         result = tms(3, 0x01, 0);
@@ -180,6 +189,11 @@ int kj_user1_exchange(const uint8_t *tx, size_t tx_len,
         return result;
     snprintf(last_error, sizeof(last_error), "ok");
     return (int)(rx_cap < length ? rx_cap : length);
+}
+
+int kj_user1_exchange(const uint8_t *tx, size_t tx_len,
+                      uint8_t *rx, size_t rx_cap, unsigned timeout_ms) {
+    return user_exchange(1, tx, tx_len, rx, rx_cap, timeout_ms);
 }
 
 void kj_close(void) {

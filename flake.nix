@@ -121,7 +121,7 @@
         '';
 
         rtl-primitives = pkgs.runCommand "rtl-primitives" {
-          nativeBuildInputs = [ python pkgs.iverilog pkgs.verilator ];
+          nativeBuildInputs = [ python pkgs.iverilog pkgs.verilator pkgs.stdenv.cc ];
         } ''
           cd ${self}
           python -m unittest -v tests/test_rtl_gates.py
@@ -180,7 +180,12 @@
           python ${self}/tinystories/rtl_memories.py --output .
           mkdir -p "$out"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_gelu.sv; synth_xilinx -family xc7 -top gptneo_gelu; stat' > "$out/gelu.log"
-          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_layernorm.sv; synth_xilinx -family xc7 -top gptneo_layernorm; stat' > "$out/layernorm.log"
+          yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv; hierarchy -top gptneo_layernorm; proc; opt; select -assert-none t:$div; synth_xilinx -family xc7 -top gptneo_layernorm; stat' > "$out/layernorm.log"
+          layernorm_dsp_count="$(awk '$2 == "DSP48E1" { count = $1 } END { print count + 0 }' "$out/layernorm.log")"
+          if [ "$layernorm_dsp_count" -gt 8 ]; then
+            echo "LayerNorm synthesized $layernorm_dsp_count DSP48E1 cells; expected at most 8" >&2
+            exit 1
+          fi
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv; synth_xilinx -family xc7 -top gptneo_attention; stat' > "$out/attention.log"
           yosys -p 'read_verilog -sv ${self}/fpga/rtl/gptneo_resident_gemv.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv; hierarchy -top gptneo_resident_gemv; proc; opt; select -assert-none t:$div; synth_xilinx -family xc7 -top gptneo_resident_gemv; stat' > "$out/gemv.log"
         '';

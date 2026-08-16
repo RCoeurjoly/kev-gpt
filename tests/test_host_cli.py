@@ -46,6 +46,12 @@ class HostCLITest(unittest.TestCase):
             self.assertLess(library.kj_user1_exchange(None, 0, None, 0, 1), 0)
             library.kj_close()
 
+    def test_native_transport_enables_digilent_hs3_buffers(self):
+        source = (ROOT / "host/jtag_transport.c").read_text()
+        self.assertIn("MPSSE_SET_HIGH", source)
+        self.assertIn("MPSSE_SET_LOW, 0x88, 0x8b", source)
+        self.assertIn("MPSSE_SET_HIGH, 0x20, 0x30", source)
+
     def test_infer_tokens_uses_transport_reply_only(self):
         reply = kevin_jtag_cli.encode_reply(0, [11, 12], 123)
 
@@ -62,6 +68,40 @@ class HostCLITest(unittest.TestCase):
         result = kevin_jtag_cli.infer_tokens(transport, [1, 2], 2, timeout_s=1)
         self.assertEqual(result, (0, [11, 12], 123))
         self.assertEqual(kevin_jtag_cli.decode_request(transport.requests[0]), (1, [1, 2], 2))
+
+    def test_debug_snapshot_is_read_over_existing_user1_transport(self):
+        payload = (
+            b"DBG1" + (123).to_bytes(4, "little") + bytes([18]) + bytes(11)
+            + (-123456).to_bytes(4, "little", signed=True)
+            + (654321).to_bytes(4, "little", signed=True)
+            + (0x123456).to_bytes(3, "little")
+            + (-7).to_bytes(1, "little", signed=True)
+            + (-5555).to_bytes(4, "little", signed=True)
+            + (-7777).to_bytes(4, "little", signed=True)
+            + (8888).to_bytes(4, "little", signed=True)
+        )
+
+        class FakeTransport:
+            def __init__(self):
+                self.responses = [b"\0", b"\0\0DB", b"G1" + payload[4:]]
+                self.requests = []
+
+            def exchange(self, data, receive_length, timeout_ms):
+                self.requests.append(bytes(data))
+                return self.responses.pop(0)
+
+        transport = FakeTransport()
+        snapshot = kevin_jtag_cli.read_debug_snapshot(transport, timeout_s=1)
+        self.assertEqual(snapshot["cycles"], 123)
+        self.assertEqual(snapshot["sequencer_state"], 18)
+        self.assertEqual(snapshot["embedding_x_q16"], -123456)
+        self.assertEqual(snapshot["embedding_token_component_q16"], 654321)
+        self.assertEqual(snapshot["embedding_position_scale_q24"], 0x123456)
+        self.assertEqual(snapshot["embedding_position_code"], -7)
+        self.assertEqual(snapshot["layernorm_y0_q16"], -5555)
+        self.assertEqual(snapshot["layernorm_normalized0_q16"], -7777)
+        self.assertEqual(snapshot["layernorm_affine0_q16"], 8888)
+        self.assertEqual(transport.requests[0], b"?")
 
 
 if __name__ == "__main__":
