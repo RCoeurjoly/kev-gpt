@@ -10,6 +10,11 @@ EXPECTED_NIXPKGS = "6fd329b2adfecb86ae49c1cba89689bd0f229e04"
 
 
 class NixContractTest(unittest.TestCase):
+    def test_repository_is_licensed_agpl_v3(self):
+        license_text = (ROOT / "LICENSE").read_text(encoding="utf-8")
+        self.assertIn("GNU AFFERO GENERAL PUBLIC LICENSE", license_text)
+        self.assertIn("Version 3, 19 November 2007", license_text)
+
     def test_kintex_build_has_no_ambient_compiler_lab_path(self):
         source = (ROOT / "nix" / "kintex-tinystories.nix").read_text()
         self.assertNotIn("/home/roland/compiler-lab-llm2fpga", source)
