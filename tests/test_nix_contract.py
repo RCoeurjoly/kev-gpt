@@ -17,7 +17,7 @@ class NixContractTest(unittest.TestCase):
     def test_flake_pins_compiler_lab_source(self):
         source = (ROOT / "flake.nix").read_text()
         self.assertIn(
-            'compilerLab.url = "github:RCoeurjoly/compiler-lab-llm2fpga"',
+            '"github:RCoeurjoly/compiler-lab-llm2fpga?dir=task3-main"',
             source,
         )
 
@@ -38,7 +38,7 @@ class NixContractTest(unittest.TestCase):
 
     def test_eda_adapter_is_narrow_and_external(self):
         source = (ROOT / "nix" / "eda-toolchain.nix").read_text(encoding="utf-8")
-        self.assertIn("task3-main-pipeline", source)
+        self.assertIn("task3 = compilerLab", source)
         self.assertNotIn("builtins.getFlake", source)
         self.assertNotIn("circt", source.lower())
         self.assertNotIn("torchMlir", source)

@@ -3,7 +3,8 @@
 
   inputs.nixpkgs.url =
     "github:NixOS/nixpkgs/6fd329b2adfecb86ae49c1cba89689bd0f229e04";
-  inputs.compilerLab.url = "github:RCoeurjoly/compiler-lab-llm2fpga";
+  inputs.compilerLab.url =
+    "github:RCoeurjoly/compiler-lab-llm2fpga?dir=task3-main";
 
   outputs = { self, nixpkgs, compilerLab }:
     let
