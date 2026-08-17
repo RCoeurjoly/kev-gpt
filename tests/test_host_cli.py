@@ -1,9 +1,11 @@
 import pathlib
+import hashlib
 import subprocess
 import sys
 import ctypes
 import tempfile
 import unittest
+from types import SimpleNamespace
 
 from host import kevin_jtag_cli
 
@@ -12,6 +14,50 @@ ROOT = pathlib.Path(__file__).resolve().parents[1]
 
 
 class HostCLITest(unittest.TestCase):
+    def test_inference_receipt_is_provenance_complete(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = pathlib.Path(temporary)
+            package = root / "package"
+            package.mkdir()
+            manifest = package / "manifest.json"
+            manifest.write_bytes(b'{"model":"tinystories-1m"}\n')
+            bitstream = root / "tinystories-interactive.bit"
+            bitstream.write_bytes(b"verified-bitstream")
+            args = SimpleNamespace(
+                package=str(package),
+                program=str(bitstream),
+                prompt="Once upon a time",
+                max_new_tokens=16,
+            )
+
+            receipt = kevin_jtag_cli.build_inference_receipt(
+                args,
+                prompt_ids=[7454, 2402, 257, 640],
+                output_ids=list(range(16)),
+                cycles=1234,
+                wall_seconds=1.25,
+            )
+
+            self.assertEqual(receipt["schema"], "kev-gpt-kintex-inference-v2")
+            self.assertEqual(receipt["prompt"], "Once upon a time")
+            self.assertEqual(receipt["prompt_ids"], [7454, 2402, 257, 640])
+            self.assertEqual(receipt["requested_tokens"], 16)
+            self.assertEqual(receipt["output_ids"], list(range(16)))
+            self.assertEqual(receipt["cycles"], 1234)
+            self.assertEqual(receipt["wall_seconds"], 1.25)
+            self.assertEqual(receipt["timing_boundary"], "request-submit-to-reply")
+            self.assertEqual(receipt["transport"], "jtag-debug-baseline")
+            self.assertEqual(receipt["board"], "YPCB-00338-1P1")
+            self.assertEqual(receipt["fpga"], "xc7k480tffg1156-1")
+            self.assertEqual(
+                receipt["package_manifest_sha256"],
+                hashlib.sha256(manifest.read_bytes()).hexdigest(),
+            )
+            self.assertEqual(
+                receipt["bitstream_sha256"],
+                hashlib.sha256(bitstream.read_bytes()).hexdigest(),
+            )
+
     def test_client_contains_no_host_model_inference(self):
         source = pathlib.Path(kevin_jtag_cli.__file__).read_text()
         for forbidden in ["tinystories.int_reference", "import torch", "AutoModel", "transformers."]:

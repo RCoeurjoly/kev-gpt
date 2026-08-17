@@ -285,6 +285,36 @@ def program_bitstream(path: str | Path, cable: str = "digilent_hs3") -> None:
     )
 
 
+def sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def build_inference_receipt(
+    args, *, prompt_ids, output_ids, cycles, wall_seconds
+) -> dict[str, object]:
+    package = Path(args.package).resolve(strict=True)
+    bitstream = Path(args.program).resolve(strict=True) if args.program else None
+    return {
+        "schema": "kev-gpt-kintex-inference-v2",
+        "prompt": args.prompt,
+        "prompt_ids": list(prompt_ids),
+        "requested_tokens": args.max_new_tokens,
+        "output_ids": list(output_ids),
+        "cycles": int(cycles),
+        "wall_seconds": float(wall_seconds),
+        "timing_boundary": "request-submit-to-reply",
+        "transport": "jtag-debug-baseline",
+        "package_manifest_sha256": sha256_file(package / "manifest.json"),
+        "bitstream_sha256": sha256_file(bitstream) if bitstream else None,
+        "board": "YPCB-00338-1P1",
+        "fpga": "xc7k480tffg1156-1",
+    }
+
+
 def _infer_command(args) -> None:
     package = Path(args.package).resolve(strict=True)
     if args.program:
@@ -295,8 +325,8 @@ def _infer_command(args) -> None:
         raise PacketError("prompt tokenized to an empty sequence")
     if len(prompt_ids) + args.max_new_tokens > MAX_CONTEXT:
         raise PacketError("prompt and completion exceed the 32-token context")
-    started = time.monotonic()
     with NativeTransport(serial=args.serial) as transport:
+        started = time.monotonic()
         status, output_ids, cycles = infer_tokens(
             transport, prompt_ids, args.max_new_tokens, args.timeout
         )
@@ -306,19 +336,13 @@ def _infer_command(args) -> None:
     completion = tokenizer.decode(output_ids, skip_special_tokens=True)
     print(completion)
     if args.json_receipt:
-        receipt = {
-            "protocol_version": PROTOCOL_VERSION,
-            "prompt": args.prompt,
-            "prompt_ids": prompt_ids,
-            "requested_tokens": args.max_new_tokens,
-            "output_ids": output_ids,
-            "completion": completion,
-            "cycles": cycles,
-            "wall_seconds": elapsed,
-            "package_manifest_sha256": hashlib.sha256(
-                (package / "manifest.json").read_bytes()
-            ).hexdigest(),
-        }
+        receipt = build_inference_receipt(
+            args,
+            prompt_ids=prompt_ids,
+            output_ids=output_ids,
+            cycles=cycles,
+            wall_seconds=elapsed,
+        )
         receipt_path = Path(args.json_receipt)
         receipt_path.parent.mkdir(parents=True, exist_ok=True)
         receipt_path.write_text(json.dumps(receipt, indent=2, sort_keys=True) + "\n")
