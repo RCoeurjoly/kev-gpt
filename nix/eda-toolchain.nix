@@ -4,8 +4,15 @@ let
   task3 = compilerLab;
   toolchain = task3.lib.${system}.task3Toolchain;
   openXC7 = task3.inputs.openXC7.packages.${system};
-  nextpnr = toolchain.nextpnr or openXC7.nextpnr-xilinx;
-  chipdb = toolchain.chipdb or openXC7.nextpnr-xilinx-chipdb.kintex7;
+  pinnedNextpnr = openXC7.nextpnr-xilinx.overrideAttrs (_: {
+    src = task3.inputs.nextpnrXilinxFork;
+  });
+  nextpnr = toolchain.nextpnr or pinnedNextpnr;
+  pinnedChipdb = openXC7.nextpnr-xilinx-chipdb.kintex7.override {
+    chipdbFootprints = [ "xc7k480tffg1156" ];
+    "nextpnr-xilinx" = nextpnr;
+  };
+  chipdb = toolchain.chipdb or "${pinnedChipdb}/xc7k480tffg1156.bin";
   familyDb = "${nextpnr}/share/nextpnr/external/prjxray-db/kintex7";
   part = "xc7k480tffg1156-1";
 in

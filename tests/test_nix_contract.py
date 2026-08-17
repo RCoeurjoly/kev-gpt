@@ -42,6 +42,8 @@ class NixContractTest(unittest.TestCase):
         self.assertNotIn("builtins.getFlake", source)
         self.assertIn("openXC7.nextpnr-xilinx", source)
         self.assertIn("openXC7.nextpnr-xilinx-chipdb.kintex7", source)
+        self.assertIn("task3.inputs.nextpnrXilinxFork", source)
+        self.assertIn('chipdbFootprints = [ "xc7k480tffg1156" ]', source)
         self.assertNotIn("circt", source.lower())
         self.assertNotIn("torchMlir", source)
 
