@@ -1,30 +1,18 @@
-{ compilerLab ? "/home/roland/compiler-lab-llm2fpga", source ? ../.
-, interactive ? false }:
+{ pkgs, compilerLab, source ? ../., interactive ? false }:
 let
-  system = builtins.currentSystem;
-  task3 = builtins.getFlake "path:${compilerLab}/task3-main";
-  pkgs = task3.inputs.nixpkgs.legacyPackages.${system};
-  openXC7 = task3.inputs.openXC7.packages.${system};
-  toolchain = task3.lib.${system}.task3Toolchain;
-  yosys = task3.inputs.nix-eda.packages.${system}.yosys;
-  fasm = openXC7.fasm;
-  prjxray = openXC7.prjxray;
+  eda = import ./eda-toolchain.nix {
+    inherit compilerLab;
+    system = pkgs.system;
+  };
+  inherit (eda) toolchain yosys fasm prjxray familyDb part partFile;
   python = pkgs.python312.withPackages (ps: [
     ps.numpy ps.intervaltree ps.json5 ps.progressbar2 ps.pyyaml ps.simplejson
   ]);
-  familyDb = "${toolchain.nextpnr}/share/nextpnr/external/prjxray-db/kintex7";
-  part = "xc7k480tffg1156-1";
-  partFile = "${familyDb}/${part}/part.yaml";
-  buildSource = pkgs.lib.fileset.toSource {
-    root = source;
-    fileset = pkgs.lib.fileset.unions [
-      (source + "/fpga/rtl")
-      (source + "/fpga/constraints/kintex_selftest.xdc")
-      (source + "/model_packages/tinystories-1m")
-      (source + "/tinystories")
-      (source + "/scripts/run-logged.sh")
-    ];
+  sourcePath = builtins.path {
+    path = source;
+    name = "kev-gpt-source";
   };
+  buildSource = sourcePath;
   modelPackage = buildSource + "/model_packages/tinystories-1m";
   top = if interactive then "tinystories_interactive_top" else "tinystories_selftest_top";
   topSource = if interactive then "${buildSource}/fpga/rtl/tinystories_interactive_top.sv ${buildSource}/fpga/rtl/bscan_packet_endpoint.sv ${buildSource}/fpga/rtl/async_fifo.sv ${buildSource}/fpga/rtl/tinystories_packet_controller.sv" else "${buildSource}/fpga/rtl/tinystories_selftest_top.sv";
@@ -52,7 +40,10 @@ let
   '';
 in pkgs.runCommand "${name}-bitstream" {
   nativeBuildInputs = [ fasm prjxray python ];
-  passthru = { inherit synthesis pnrNetlist; };
+  passthru = {
+    inherit synthesis pnrNetlist modelPackage part;
+    buildMode = if interactive then "interactive" else "selftest";
+  };
 } ''
   set -euo pipefail
   mkdir work "$out"

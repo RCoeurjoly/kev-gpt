@@ -3,8 +3,9 @@
 
   inputs.nixpkgs.url =
     "github:NixOS/nixpkgs/6fd329b2adfecb86ae49c1cba89689bd0f229e04";
+  inputs.compilerLab.url = "github:RCoeurjoly/compiler-lab-llm2fpga";
 
-  outputs = { self, nixpkgs }:
+  outputs = { self, nixpkgs, compilerLab }:
     let
       system = "x86_64-linux";
       pkgs = nixpkgs.legacyPackages.${system};
@@ -69,6 +70,16 @@
           export KEVIN_MODEL_PACKAGE=${self}/model_packages/tinystories-1m
           exec python -m host.kevin_jtag_cli "$@"
         '';
+      };
+      kintexInteractive = import ./nix/kintex-tinystories.nix {
+        inherit pkgs compilerLab;
+        source = self;
+        interactive = true;
+      };
+      kintexSelftest = import ./nix/kintex-tinystories.nix {
+        inherit pkgs compilerLab;
+        source = self;
+        interactive = false;
       };
     in
     {
@@ -163,9 +174,13 @@
       };
 
       lib.edaToolchain = compilerLab:
-        import ./nix/eda-toolchain.nix { inherit compilerLab; };
+        import ./nix/eda-toolchain.nix { inherit compilerLab system; };
 
       packages.${system} = {
+        kintex-tinystories-interactive = kintexInteractive;
+        kintex-tinystories-selftest = kintexSelftest;
+        kintex-tinystories-interactive-synthesis =
+          kintexInteractive.passthru.synthesis;
         tinystories-1m-source = modelSource;
         tinystories-1m-package-regenerated = regeneratedModelPackage;
         tinystories-rtl-fixture = rtlFixture;
