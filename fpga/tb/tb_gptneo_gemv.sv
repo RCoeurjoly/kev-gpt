@@ -15,6 +15,10 @@ module tb_gptneo_gemv;
     reg [$clog2(MMAX+1)-1:0] m_count=0;
     wire [$clog2(MMAX)-1:0] out_index;wire signed [63:0] out_accumulator;
     wire signed [31:0] out_value_q16;wire signed [7:0] out_code;
+    wire memory_req_valid,memory_rsp_ready;
+    reg memory_req_ready=0,memory_rsp_valid=0;
+    wire [$clog2((WDEPTH_BYTES+3)/4)-1:0] memory_req_word_addr;
+    reg [31:0] memory_rsp_data=0;
     gptneo_resident_gemv #(.MMAX(MMAX),.KMAX(KMAX),.WDEPTH_BYTES(WDEPTH_BYTES)) dut(.*);
     task putw;input integer address;input [31:0] value;begin
         weight_addr<=address;weight_data<=value;weight_we<=1;@(posedge clk);weight_we<=0;end endtask

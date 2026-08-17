@@ -8,6 +8,10 @@ module tb_gptneo_sequencer;
   wire [62:0] debug_status;
   wire [95:0] debug_embedding;
   wire [95:0] debug_layernorm;
+  wire memory_req_valid,memory_rsp_ready;
+  reg memory_req_ready=0,memory_rsp_valid=0;
+  wire [$clog2((3825235+3)/4)-1:0] memory_req_word_addr;
+  reg [31:0] memory_rsp_data=0;
   reg [15:0] prompts[0:63],expected[0:63];
   integer observed;
 `ifdef GPTNEO_DEBUG_EMB

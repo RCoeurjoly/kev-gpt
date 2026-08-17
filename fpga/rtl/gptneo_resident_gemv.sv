@@ -3,7 +3,8 @@
 // Serial package-resident W8A8 GEMV with Q8.24 scales and Q16.16 outputs.
 module gptneo_resident_gemv #(
     parameter integer MMAX=50257, parameter integer KMAX=256,
-    parameter integer WDEPTH_BYTES=3825235, parameter WEIGHT_FILE=""
+    parameter integer WDEPTH_BYTES=3825235, parameter WEIGHT_FILE="",
+    parameter integer EXTERNAL_MEMORY=0
 ) (
     input wire clk,input wire rst,input wire weight_we,
     input wire [$clog2((WDEPTH_BYTES+3)/4)-1:0] weight_addr,input wire [31:0] weight_data,
@@ -20,13 +21,16 @@ module gptneo_resident_gemv #(
     input wire [$clog2(MMAX+1)-1:0] m_count,input wire [$clog2(KMAX+1)-1:0] k_count,
     output reg out_valid,input wire out_ready,output reg [$clog2(MMAX)-1:0] out_index,
     output reg signed [63:0] out_accumulator,output reg signed [31:0] out_value_q16,
-    output reg signed [7:0] out_code,output wire busy
+    output reg signed [7:0] out_code,output wire busy,
+    output wire memory_req_valid,input wire memory_req_ready,
+    output wire [$clog2((WDEPTH_BYTES+3)/4)-1:0] memory_req_word_addr,
+    input wire memory_rsp_valid,output wire memory_rsp_ready,input wire [31:0] memory_rsp_data
 );
     localparam integer WWORDS=(WDEPTH_BYTES+3)/4;
     (* ram_style="block" *) reg [31:0] image[0:WWORDS-1];
     (* ram_style="distributed" *) reg signed [31:0] activation_values[0:KMAX-1];
     (* ram_style="distributed" *) reg signed [31:0] scaled_activations[0:KMAX-1];
-    initial if(WEIGHT_FILE!="") $readmemh(WEIGHT_FILE,image);
+    initial if(!EXTERNAL_MEMORY&&WEIGHT_FILE!="") $readmemh(WEIGHT_FILE,image);
     localparam IDLE=6'd0,W_ADDR=6'd1,W_READ=6'd2,MAC=6'd3,
       Q_ADDR=6'd4,Q_READ0=6'd5,Q_READ1=6'd6,Q_READ2=6'd7,Q_CAPTURE=6'd8,
       WS_ADDR=6'd9,WS_READ0=6'd10,WS_READ1=6'd11,WS_READ2=6'd12,WS_CAPTURE=6'd13,
@@ -45,9 +49,39 @@ module gptneo_resident_gemv #(
     reg signed [127:0] scale_product;reg signed [63:0] real_q16,numerator,qcode_wide;
     reg signed [63:0] magnitude,dequant_product,clipped_code;
     reg [23:0] input_quant_scale_q24;
+    reg memory_read_inflight;
     reg div_start;reg signed [95:0] div_numerator;reg [63:0] div_denominator;
     wire div_busy,div_done;wire signed [31:0] div_quotient;
     assign activation_ready=(state==IDLE)&&(activation_ptr<k_count);assign busy=(state!=IDLE);
+    function automatic is_memory_read_state;
+        input [5:0] value;begin
+            case(value)
+                W_READ,Q_READ0,Q_READ2,WS_READ0,WS_READ2,B_READ,
+                OS_READ0,OS_READ2,RAW_READ0,RAW_READ2:is_memory_read_state=1'b1;
+                default:is_memory_read_state=1'b0;
+            endcase
+        end
+    endfunction
+    function automatic [5:0] memory_read_next_state;
+        input [5:0] value;begin
+            case(value)
+                W_READ:memory_read_next_state=MAC;
+                Q_READ0:memory_read_next_state=Q_READ1;
+                Q_READ2:memory_read_next_state=Q_CAPTURE;
+                WS_READ0:memory_read_next_state=WS_READ1;
+                WS_READ2:memory_read_next_state=WS_CAPTURE;
+                B_READ:memory_read_next_state=B_CAPTURE;
+                OS_READ0:memory_read_next_state=OS_READ1;
+                OS_READ2:memory_read_next_state=OS_CAPTURE;
+                RAW_READ0:memory_read_next_state=RAW_READ1;
+                RAW_READ2:memory_read_next_state=RAW_RESP;
+                default:memory_read_next_state=IDLE;
+            endcase
+        end
+    endfunction
+    assign memory_req_valid=EXTERNAL_MEMORY&&is_memory_read_state(state)&&!memory_read_inflight;
+    assign memory_req_word_addr=word_address;
+    assign memory_rsp_ready=EXTERNAL_MEMORY&&is_memory_read_state(state)&&memory_read_inflight;
     gptneo_iterative_divider quant_divider(
         .clk(clk),.rst(rst),.start(div_start),.numerator(div_numerator),
         .denominator(div_denominator),.busy(div_busy),.done(div_done),.quotient(div_quotient));
@@ -57,14 +91,21 @@ module gptneo_resident_gemv #(
             rounded_shift32=value<0?-mag:mag;end
     endfunction
     always @(posedge clk) begin
-        if(weight_we)image[weight_addr]<=weight_data;
+        if(!EXTERNAL_MEMORY&&weight_we)image[weight_addr]<=weight_data;
         if(rst)begin state<=IDLE;activation_ptr<=0;out_valid<=0;raw_valid<=0;div_start<=0;
+            memory_read_inflight<=0;
             row<=0;column<=0;accumulator<=0;end
         else begin
             div_start<=0;
             if(activation_valid&&activation_ready)begin activation_values[activation_ptr]<=activation_data_q16;
                 activation_ptr<=activation_ptr+1'b1;end
-            case(state)
+            if(EXTERNAL_MEMORY&&is_memory_read_state(state))begin
+                if(!memory_read_inflight&&memory_req_ready)memory_read_inflight<=1;
+                if(memory_read_inflight&&memory_rsp_valid)begin
+                    read_word<=memory_rsp_data;memory_read_inflight<=0;
+                    state<=memory_read_next_state(state);
+                end
+            end else case(state)
                 IDLE:if(raw_read)begin word_address<=raw_addr>>2;scale_lane<=raw_addr[1:0];state<=RAW_READ0;end
                     else if(start)begin row<=0;column<=0;accumulator<=0;out_valid<=0;state<=Q_ADDR;end
                 Q_ADDR:begin byte_address=input_scale_base+column*3;word_address<=byte_address>>2;

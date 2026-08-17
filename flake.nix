@@ -215,6 +215,22 @@
           mkdir -p "$out"
           yosys -p 'read_verilog -sv -I. ${self}/fpga/rtl/gptneo_sequencer.sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_gelu.sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; synth_xilinx -family xc7 -top gptneo_sequencer; stat' > "$out/sequencer.log"
         '';
+        gptneo-sequencer-external-yosys-report = pkgs.runCommand "gptneo-sequencer-external-yosys-report" {
+          nativeBuildInputs = [ python pkgs.yosys ];
+        } ''
+          mkdir work
+          cp ${rtlFixture}/gptneo_package.svh work/
+          python ${self}/tinystories/rtl_memories.py --output work
+          cd work
+          mkdir -p "$out"
+          yosys -p 'read_verilog -sv -I. ${self}/fpga/rtl/gptneo_sequencer.sv ${self}/fpga/rtl/gptneo_layernorm.sv ${self}/fpga/rtl/gptneo_gelu.sv ${self}/fpga/rtl/gptneo_attention.sv ${self}/fpga/rtl/gptneo_iterative_divider.sv ${self}/fpga/rtl/gptneo_resident_gemv.sv; chparam -set EXTERNAL_MEMORY 1 gptneo_sequencer; synth_xilinx -family xc7 -top gptneo_sequencer; stat' > "$out/sequencer.log"
+          ramb36_count="$(awk '$2 == "RAMB36E1" { count = $1 } END { print count + 0 }' "$out/sequencer.log")"
+          if [ "$ramb36_count" -ge 100 ]; then
+            echo "External model storage retained $ramb36_count RAMB36E1 cells" >&2
+            exit 1
+          fi
+          printf '%s\n' "$ramb36_count" > "$out/ramb36-count"
+        '';
         default = modelSource;
       };
     };

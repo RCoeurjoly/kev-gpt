@@ -10,6 +10,7 @@ module gptneo_sequencer #(
     parameter integer HIDDEN=256,
     parameter integer VOCAB=50257,
     parameter integer WDEPTH_BYTES=3825235,
+    parameter integer EXTERNAL_MEMORY=0,
     parameter MODEL_FILE="model_image.mem",
     parameter GELU_FILE="gptneo_gelu.mem",
     parameter EXP_FILE="gptneo_exp.mem"
@@ -20,7 +21,10 @@ module gptneo_sequencer #(
     output reg token_valid,input wire token_ready,output reg [15:0] token_id,
     output wire busy,output reg error,output reg [7:0] error_code,
     output wire [62:0] debug_status,output reg [95:0] debug_embedding,
-    output wire [95:0] debug_layernorm
+    output wire [95:0] debug_layernorm,
+    output wire memory_req_valid,input wire memory_req_ready,
+    output wire [$clog2((WDEPTH_BYTES+3)/4)-1:0] memory_req_word_addr,
+    input wire memory_rsp_valid,output wire memory_rsp_ready,input wire [31:0] memory_rsp_data
 );
 `include "gptneo_package.svh"
     localparam ERR_PACKAGE_HASH=8'd1,ERR_CONTEXT=8'd2;
@@ -101,7 +105,7 @@ module gptneo_sequencer #(
     end
 
     gptneo_resident_gemv #(.MMAX(VOCAB),.KMAX(HIDDEN),.WDEPTH_BYTES(WDEPTH_BYTES),
-      .WEIGHT_FILE(MODEL_FILE)) gemv(
+      .WEIGHT_FILE(MODEL_FILE),.EXTERNAL_MEMORY(EXTERNAL_MEMORY)) gemv(
       .clk(clk),.rst(rst),.weight_we(1'b0),.weight_addr(0),.weight_data(0),
       .raw_read(gemv_raw_read),.raw_addr(gemv_raw_addr),.raw_valid(gemv_raw_valid),
       .raw_ready(gemv_raw_ready),.raw_data(gemv_raw_data),
@@ -112,7 +116,10 @@ module gptneo_sequencer #(
       .bias_base(bias_base),.has_output_scale(has_output_scale),.has_bias(has_bias),
       .m_count(m_count),.k_count(k_count),.out_valid(gemv_out_valid),.out_ready(1'b1),
       .out_index(gemv_out_index),.out_accumulator(gemv_out_accumulator),
-      .out_value_q16(gemv_out_value),.out_code(gemv_out_code),.busy(gemv_busy));
+      .out_value_q16(gemv_out_value),.out_code(gemv_out_code),.busy(gemv_busy),
+      .memory_req_valid(memory_req_valid),.memory_req_ready(memory_req_ready),
+      .memory_req_word_addr(memory_req_word_addr),.memory_rsp_valid(memory_rsp_valid),
+      .memory_rsp_ready(memory_rsp_ready),.memory_rsp_data(memory_rsp_data));
     gptneo_layernorm #(.D(D)) layernorm(.clk(clk),.rst(rst),.in_valid(ln_in_valid),
       .in_ready(ln_in_ready),.in_x(ln_x),.in_gamma(ln_gamma),.in_beta(ln_beta),
       .start(ln_start),.out_valid(ln_out_valid),.out_ready(1'b1),.out_index(ln_out_index),

@@ -77,8 +77,65 @@ class RTLPrimitiveGateTest(unittest.TestCase):
                 )
                 self.assertIn(verdict, simulation.stdout)
 
+    def test_gemv_external_memory_handles_delayed_unaligned_reads(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            executable = pathlib.Path(temporary) / "gemv_external_memory"
+            compile_result = subprocess.run(
+                [
+                    "iverilog", "-g2012", "-s", "tb_gptneo_external_memory",
+                    "-o", executable,
+                    ROOT / "fpga/rtl/gptneo_resident_gemv.sv",
+                    ROOT / "fpga/rtl/gptneo_iterative_divider.sv",
+                    ROOT / "fpga/tb/tb_gptneo_external_memory.sv",
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(compile_result.returncode, 0, compile_result.stderr)
+            simulation = subprocess.run(
+                ["vvp", executable], text=True, capture_output=True
+            )
+            self.assertEqual(
+                simulation.returncode, 0, simulation.stdout + simulation.stderr
+            )
+            self.assertIn("GPTNEO_EXTERNAL_MEMORY_PASS requests=2", simulation.stdout)
+
 
 class RTLSequencerGateTest(unittest.TestCase):
+    def test_sequencer_forwards_model_reads_to_external_memory(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            directory = pathlib.Path(temporary)
+            fixture = directory / "fixture"
+            write_rtl_fixture(ROOT / "model_packages" / "tinystories-1m", fixture)
+            write_gelu_lut(fixture)
+            write_exp_lut(fixture)
+            executable = directory / "sequencer_external"
+            sources = [
+                ROOT / "fpga/rtl/gptneo_sequencer.sv",
+                ROOT / "fpga/rtl/gptneo_layernorm.sv",
+                ROOT / "fpga/rtl/gptneo_gelu.sv",
+                ROOT / "fpga/rtl/gptneo_attention.sv",
+                ROOT / "fpga/rtl/gptneo_iterative_divider.sv",
+                ROOT / "fpga/rtl/gptneo_resident_gemv.sv",
+                ROOT / "fpga/tb/tb_gptneo_sequencer_external_smoke.sv",
+            ]
+            compilation = subprocess.run(
+                [
+                    "iverilog", "-g2012", "-s", "tb_gptneo_sequencer_external_smoke",
+                    f"-I{fixture}", "-o", executable, *sources,
+                ],
+                text=True,
+                capture_output=True,
+            )
+            self.assertEqual(compilation.returncode, 0, compilation.stderr)
+            simulation = subprocess.run(
+                ["vvp", executable], cwd=fixture, text=True, capture_output=True
+            )
+            self.assertEqual(
+                simulation.returncode, 0, simulation.stdout + simulation.stderr
+            )
+            self.assertIn("GPTNEO_SEQUENCER_EXTERNAL_PASS requests=3", simulation.stdout)
+
     def test_three_streams_and_corrupt_package_verdict(self):
         with tempfile.TemporaryDirectory() as temporary:
             directory = pathlib.Path(temporary)
