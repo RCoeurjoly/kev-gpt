@@ -40,6 +40,8 @@ class NixContractTest(unittest.TestCase):
         source = (ROOT / "nix" / "eda-toolchain.nix").read_text(encoding="utf-8")
         self.assertIn("task3 = compilerLab", source)
         self.assertNotIn("builtins.getFlake", source)
+        self.assertIn("openXC7.nextpnr-xilinx", source)
+        self.assertIn("openXC7.nextpnr-xilinx-chipdb.kintex7", source)
         self.assertNotIn("circt", source.lower())
         self.assertNotIn("torchMlir", source)
 

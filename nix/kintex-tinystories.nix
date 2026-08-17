@@ -4,7 +4,7 @@ let
     inherit compilerLab;
     system = pkgs.system;
   };
-  inherit (eda) toolchain yosys fasm prjxray familyDb part partFile;
+  inherit (eda) yosys nextpnr chipdb fasm prjxray familyDb part partFile;
   python = pkgs.python312.withPackages (ps: [
     ps.numpy ps.intervaltree ps.json5 ps.progressbar2 ps.pyyaml ps.simplejson
   ]);
@@ -49,8 +49,8 @@ in pkgs.runCommand "${name}-bitstream" {
   mkdir work "$out"
   cd work
   bash ${buildSource}/scripts/run-logged.sh "$out/nextpnr.log" \
-    ${toolchain.nextpnr}/bin/nextpnr-xilinx \
-    --chipdb ${toolchain.chipdb} \
+    ${nextpnr}/bin/nextpnr-xilinx \
+    --chipdb ${chipdb} \
     --freq 50 \
     --xdc ${buildSource}/fpga/constraints/kintex_selftest.xdc \
     --json ${pnrNetlist}/design.json --fasm design.fasm
